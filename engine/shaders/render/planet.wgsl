@@ -222,9 +222,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let normal = normalize(frameBasis * normalize(vec3f(bumpVec.xy * bumpStrength, bumpVec.z)));
   let diffuse = max(dot(normal, dirToSun), 0.0);
 
-  let ambient = 0.16 + terrainVariation * 0.05 + humidityNoise * 0.03;
+  let skyColor = vec3f(0.42, 0.58, 0.86);
+  let groundColor = vec3f(0.18, 0.12, 0.08);
+  let hemiFactor = normal.y * 0.5 + 0.5;
+  let hemisphereLight = mix(groundColor, skyColor, hemiFactor);
   let rimLight = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0) * 0.08;
   let backLight = pow(max(dot(-dirToSun, viewDir), 0.0), 3.0) * slope * 0.12;
-  let lighting = ambient + diffuse * 0.88 + rimLight + backLight;
-  return vec4f(albedo * lighting, 1.0);
+  let albedoLighting = albedo * hemisphereLight * 0.9 + albedo * diffuse * 0.88 + vec3f(rimLight + backLight);
+  let dist = length(frame.cameraPos.xyz - in.worldPos);
+  let fogFactor = 1.0 - exp(-dist * 0.0015);
+  let finalColor = mix(albedoLighting, vec3f(0.22, 0.42, 0.86), fogFactor);
+  return vec4f(finalColor, 1.0);
 }

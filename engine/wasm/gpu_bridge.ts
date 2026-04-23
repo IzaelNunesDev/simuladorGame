@@ -300,7 +300,6 @@ export class GpuBridge {
       entries: [
         { binding: 0, resource: { buffer: terrainParamBuffer } },
         { binding: 1, resource: { buffer: terrainPositionBuffer } },
-        { binding: 2, resource: { buffer: terrainNormalBuffer } },
         { binding: 3, resource: { buffer: terrainHeightBuffer } },
       ],
     });

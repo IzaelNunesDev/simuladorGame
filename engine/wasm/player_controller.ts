@@ -12,7 +12,10 @@ import {
   vec3ProjectOnPlane,
   vec3RotateByQuat,
   vec3Scale,
+  vec3Length,
 } from "./math";
+import type { TerrainNoiseSettings } from "./gpu_bridge";
+import { getTerrainHeight } from "./noise";
 
 export interface PlayerInputState {
   pitch: number;
@@ -92,6 +95,8 @@ export function updatePlayerController(
   player: PlayerState,
   input: PlayerInputState,
   deltaTime: number,
+  terrainNoise: TerrainNoiseSettings,
+  seaLevel: number,
 ): PlayerState {
   player.speed = clamp(
     player.speed + (input.throttle - input.brake) * player.acceleration * deltaTime,
@@ -128,11 +133,18 @@ export function updatePlayerController(
   vec3Scale(player._scratchA, player.forward, player.speed * deltaTime);
   vec3AddScaled(player.position, player.position, player._scratchA, 1);
 
-  // Fake gravity: keep the aircraft constrained to the orbital shell.
   vec3Normalize(player.gravityUp, player.position);
-  vec3Scale(player.position, player.gravityUp, player.worldRadius + player.flyHeight);
+  const landHeight = getTerrainHeight(player.gravityUp, terrainNoise);
+  const minRadius = player.worldRadius + Math.max(landHeight, seaLevel) + 2.0;
+  const targetRadius = Math.max(player.worldRadius + player.flyHeight, minRadius);
+  const currentRadius = vec3Length(player.position);
+  if (currentRadius < minRadius) {
+    vec3Scale(player.position, player.gravityUp, minRadius);
+    player.speed = clamp(player.speed * 0.8, player.minSpeed, player.maxSpeed);
+  } else {
+    vec3Scale(player.position, player.gravityUp, targetRadius);
+  }
 
-  // Realign orientation to the new gravity vector so the craft never flips under the planet.
   vec3ProjectOnPlane(player.forward, player.forward, player.gravityUp);
   if (vec3LengthSq(player.forward) < 1e-6) {
     vec3Cross(player.forward, player.up, player.right);

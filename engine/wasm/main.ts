@@ -25,9 +25,9 @@ const DEFAULT_CONFIG: EngineConfig = {
   seaLevel: 18,
   atmosphereHeight: 260,
   particleCount: 4096,
-  cloudCollisionRadius: 72,
-  cloudRelaxToHome: 0.18,
-  cloudBillboardSize: 18,
+  cloudCollisionRadius: 150.0,
+  cloudRelaxToHome: 0.05,
+  cloudBillboardSize: 15.0,
   cloudStrength: 0.82,
   terrainNoise: {
     octaves: 5,
@@ -172,7 +172,13 @@ export class MiniEngine {
     const deltaTime = Math.min(0.05, Math.max(0.001, (timeMs - this.lastTimeMs) * 0.001));
     this.lastTimeMs = timeMs;
 
-    updatePlayerController(this.player, this.input, deltaTime);
+    updatePlayerController(
+      this.player,
+      this.input,
+      deltaTime,
+      this.config.terrainNoise,
+      this.config.seaLevel,
+    );
     updateOrbitalCamera(
       this.camera,
       this.player.position,
