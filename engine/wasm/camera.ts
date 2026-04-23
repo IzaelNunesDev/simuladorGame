@@ -49,7 +49,7 @@ export function createCameraState(): CameraState {
     lookAhead: 20,
     fovY: 75 * DEG_TO_RAD,
     nearPlane: 0.1,
-    farPlane: 20000,
+    farPlane: 10000,
     _scratchForward: vec3(),
   };
 }

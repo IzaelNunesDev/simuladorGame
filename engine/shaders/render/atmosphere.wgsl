@@ -69,5 +69,5 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let sunset = vec3f(0.98, 0.48, 0.22);
   let sky = mix(base, sunset, forwardScatter * 0.6);
   let alpha = horizon * 0.35;
-  return vec4f(sky * horizon, alpha);
+  return vec4f(sky, alpha);
 }

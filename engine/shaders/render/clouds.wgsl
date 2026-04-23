@@ -100,8 +100,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let shading = max(0.0, dot(cloudNormal, normalize(frame.sunDir.xyz)));
   let edge = smoothstep(1.0, 0.0, r2);
   let cloudStrength = edge * cloudParams.cloudStrength;
-  let backgroundCol = vec3f(0.58, 0.68, 0.82);
   let cloudCol = mix(vec3f(0.48, 0.52, 0.58), vec3f(0.96, 0.97, 1.0), shading);
-  let finalCol = mix(backgroundCol, cloudCol, cloudStrength);
-  return vec4f(finalCol, cloudStrength * 0.58);
+  return vec4f(cloudCol, cloudStrength * 0.58);
 }

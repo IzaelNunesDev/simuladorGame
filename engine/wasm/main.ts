@@ -131,10 +131,12 @@ export class MiniEngine {
   setKeyState(code: string, pressed: boolean): void {
     const value = pressed ? 1 : 0;
     switch (code) {
+      case "KeyW":
       case "ArrowUp":
       case "KeyI":
         this.input.pitch = -value;
         break;
+      case "KeyS":
       case "ArrowDown":
       case "KeyK":
         this.input.pitch = value;
@@ -153,11 +155,9 @@ export class MiniEngine {
       case "KeyE":
         this.input.roll = value;
         break;
-      case "KeyW":
       case "ShiftLeft":
         this.input.throttle = value;
         break;
-      case "KeyS":
       case "ControlLeft":
         this.input.brake = value;
         break;
@@ -190,7 +190,7 @@ export class MiniEngine {
     this.bridge.updateFrameUniforms(this.camera, this.sunDirection, timeMs * 0.001, deltaTime);
     this.bridge.updateCloudUniforms(this.player, deltaTime);
     this.bridge.updateAirplaneUniforms(this.player);
-    this.bridge.render(this.context.getCurrentTexture().createView());
+    this.bridge.render(this.context.getCurrentTexture().createView(), this.camera);
 
     requestAnimationFrame(this.animationFrame);
   }

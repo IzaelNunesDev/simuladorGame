@@ -50,6 +50,7 @@ export class GpuBridge {
   readonly terrainVertexCount: number;
   readonly terrainIndexCount: number;
   readonly cloudParticleCount: number;
+  readonly terrainFaceIndexCount: number;
 
   private readonly frameUniformData = new Float32Array(FRAME_UNIFORM_FLOATS);
   private readonly cloudUniformData = new Float32Array(CLOUD_UNIFORM_FLOATS);
@@ -89,6 +90,30 @@ export class GpuBridge {
 
   private depthTexture: GPUTexture | null = null;
   private depthTextureView: GPUTextureView | null = null;
+
+  private writeMat4(target: Float32Array, offset: number, value: Float32Array): void {
+    this.assertFloatWrite(target, offset, 16);
+    target.set(value, offset);
+  }
+
+  private writeVec4(target: Float32Array, offset: number, x: number, y: number, z: number, w: number): void {
+    this.assertFloatWrite(target, offset, 4);
+    target[offset + 0] = x;
+    target[offset + 1] = y;
+    target[offset + 2] = z;
+    target[offset + 3] = w;
+  }
+
+  private writeScalar(target: Float32Array, offset: number, value: number): void {
+    this.assertFloatWrite(target, offset, 1);
+    target[offset] = value;
+  }
+
+  private assertFloatWrite(target: Float32Array, offset: number, length: number): void {
+    if (offset < 0 || offset + length > target.length) {
+      throw new Error(`Uniform write out of bounds: offset=${offset} length=${length} size=${target.length}`);
+    }
+  }
 
   private constructor(
     device: GPUDevice,
@@ -132,6 +157,7 @@ export class GpuBridge {
     this.terrainVertexCount = terrainVertexCount;
     this.terrainIndexCount = terrainIndexCount;
     this.cloudParticleCount = cloudParticleCount;
+    this.terrainFaceIndexCount = terrainIndexCount / 6;
     this.frameUniformBuffer = frameUniformBuffer;
     this.terrainParamBuffer = terrainParamBuffer;
     this.cloudParamBuffer = cloudParamBuffer;
@@ -381,67 +407,56 @@ export class GpuBridge {
   }
 
   updateFrameUniforms(camera: CameraState, sunDirection: Vec3, time: number, deltaTime: number): void {
-    this.frameUniformData.set(camera.viewProjectionMatrix, 0);
-    this.frameUniformData.set([camera.position[0], camera.position[1], camera.position[2], 1], 16);
-    this.frameUniformData.set([sunDirection[0], sunDirection[1], sunDirection[2], 0], 20);
-    this.frameUniformData.set([camera.right[0], camera.right[1], camera.right[2], 0], 24);
-    this.frameUniformData.set([camera.up[0], camera.up[1], camera.up[2], 0], 28);
-    this.frameUniformData[32] = time;
-    this.frameUniformData[33] = deltaTime;
-    this.frameUniformData[34] = this.config.worldRadius;
-    this.frameUniformData[35] = this.config.seaLevel;
-    this.frameUniformData[36] = this.config.atmosphereHeight;
-    this.frameUniformData[37] = this.config.flyHeight;
-    this.frameUniformData[38] = 0;
-    this.frameUniformData[39] = 0;
+    this.writeMat4(this.frameUniformData, 0, camera.viewProjectionMatrix);
+    this.writeVec4(this.frameUniformData, 16, camera.position[0], camera.position[1], camera.position[2], 1);
+    this.writeVec4(this.frameUniformData, 20, sunDirection[0], sunDirection[1], sunDirection[2], 0);
+    this.writeVec4(this.frameUniformData, 24, camera.right[0], camera.right[1], camera.right[2], 0);
+    this.writeVec4(this.frameUniformData, 28, camera.up[0], camera.up[1], camera.up[2], 0);
+    this.writeScalar(this.frameUniformData, 32, time);
+    this.writeScalar(this.frameUniformData, 33, deltaTime);
+    this.writeScalar(this.frameUniformData, 34, this.config.worldRadius);
+    this.writeScalar(this.frameUniformData, 35, this.config.seaLevel);
+    this.writeScalar(this.frameUniformData, 36, this.config.atmosphereHeight);
+    this.writeScalar(this.frameUniformData, 37, this.config.flyHeight);
+    this.writeScalar(this.frameUniformData, 38, 0);
+    this.writeScalar(this.frameUniformData, 39, 0);
     this.device.queue.writeBuffer(this.frameUniformBuffer, 0, this.frameUniformData);
   }
 
   updateCloudUniforms(player: PlayerState, deltaTime: number): void {
-    this.cloudUniformData.set([player.position[0], player.position[1], player.position[2], 1], 0);
-    this.cloudUniformData.set([player.forward[0], player.forward[1], player.forward[2], 0], 4);
-    this.cloudUniformData[8] = this.config.cloudCollisionRadius;
-    this.cloudUniformData[9] = Math.max(player.speed * 0.015, 0.05);
-    this.cloudUniformData[10] = this.config.cloudRelaxToHome;
-    this.cloudUniformData[11] = deltaTime;
-    this.cloudUniformData[12] = this.config.particleCount;
-    this.cloudUniformData[13] = this.config.cloudBillboardSize;
-    this.cloudUniformData[14] = this.config.cloudStrength;
-    this.cloudUniformData[15] = 0.985;
-    this.cloudUniformData[16] = 0;
-    this.cloudUniformData[17] = 0;
-    this.cloudUniformData[18] = 0;
-    this.cloudUniformData[19] = 0;
+    this.writeVec4(this.cloudUniformData, 0, player.position[0], player.position[1], player.position[2], 1);
+    this.writeVec4(this.cloudUniformData, 4, player.forward[0], player.forward[1], player.forward[2], 0);
+    this.writeScalar(this.cloudUniformData, 8, this.config.cloudCollisionRadius);
+    this.writeScalar(this.cloudUniformData, 9, Math.max(player.speed * 0.015, 0.05));
+    this.writeScalar(this.cloudUniformData, 10, this.config.cloudRelaxToHome);
+    this.writeScalar(this.cloudUniformData, 11, deltaTime);
+    this.writeScalar(this.cloudUniformData, 12, this.config.particleCount);
+    this.writeScalar(this.cloudUniformData, 13, this.config.cloudBillboardSize);
+    this.writeScalar(this.cloudUniformData, 14, this.config.cloudStrength);
+    this.writeScalar(this.cloudUniformData, 15, 0.985);
+    this.writeScalar(this.cloudUniformData, 16, 0);
+    this.writeScalar(this.cloudUniformData, 17, 0);
+    this.writeScalar(this.cloudUniformData, 18, 0);
+    this.writeScalar(this.cloudUniformData, 19, 0);
     this.device.queue.writeBuffer(this.cloudParamBuffer, 0, this.cloudUniformData);
   }
 
   updateAirplaneUniforms(player: PlayerState): void {
-    const bankAngle = player.rollBank * 1.25;
-    const cosBank = Math.cos(bankAngle);
-    const sinBank = Math.sin(bankAngle);
-
-    const rolledRightX = player.right[0] * cosBank + player.up[0] * sinBank;
-    const rolledRightY = player.right[1] * cosBank + player.up[1] * sinBank;
-    const rolledRightZ = player.right[2] * cosBank + player.up[2] * sinBank;
-    const rolledUpX = player.up[0] * cosBank - player.right[0] * sinBank;
-    const rolledUpY = player.up[1] * cosBank - player.right[1] * sinBank;
-    const rolledUpZ = player.up[2] * cosBank - player.right[2] * sinBank;
-
     const scale = Math.max(this.config.flyHeight * 0.012, 1.35);
     const offsetForward = scale * 5.5;
     const offsetDown = scale * 0.65;
-    const planePosX = player.position[0] + player.forward[0] * offsetForward - rolledUpX * offsetDown;
-    const planePosY = player.position[1] + player.forward[1] * offsetForward - rolledUpY * offsetDown;
-    const planePosZ = player.position[2] + player.forward[2] * offsetForward - rolledUpZ * offsetDown;
+    const planePosX = player.position[0] + player.forward[0] * offsetForward - player.up[0] * offsetDown;
+    const planePosY = player.position[1] + player.forward[1] * offsetForward - player.up[1] * offsetDown;
+    const planePosZ = player.position[2] + player.forward[2] * offsetForward - player.up[2] * offsetDown;
 
-    this.airplaneUniformData[0] = rolledRightX * scale;
-    this.airplaneUniformData[1] = rolledRightY * scale;
-    this.airplaneUniformData[2] = rolledRightZ * scale;
+    this.airplaneUniformData[0] = player.right[0] * scale;
+    this.airplaneUniformData[1] = player.right[1] * scale;
+    this.airplaneUniformData[2] = player.right[2] * scale;
     this.airplaneUniformData[3] = 0;
 
-    this.airplaneUniformData[4] = rolledUpX * scale;
-    this.airplaneUniformData[5] = rolledUpY * scale;
-    this.airplaneUniformData[6] = rolledUpZ * scale;
+    this.airplaneUniformData[4] = player.up[0] * scale;
+    this.airplaneUniformData[5] = player.up[1] * scale;
+    this.airplaneUniformData[6] = player.up[2] * scale;
     this.airplaneUniformData[7] = 0;
 
     this.airplaneUniformData[8] = player.forward[0] * scale;
@@ -461,7 +476,7 @@ export class GpuBridge {
     this.device.queue.writeBuffer(this.airplaneUniformBuffer, 0, this.airplaneUniformData);
   }
 
-  render(currentTextureView: GPUTextureView): void {
+  render(currentTextureView: GPUTextureView, camera: CameraState): void {
     if (!this.depthTextureView) {
       return;
     }
@@ -491,21 +506,18 @@ export class GpuBridge {
       },
     });
 
-    pass.setIndexBuffer(this.terrainIndexBuffer, "uint32");
-    pass.setPipeline(this.atmosphereRenderPipeline);
-    pass.setBindGroup(0, this.atmosphereFrameBindGroup);
-    pass.setBindGroup(1, this.atmosphereTerrainBindGroup);
-    pass.drawIndexed(this.terrainIndexCount, 1, 0, 0, 0);
+    const visibleFaces = getVisibleTerrainFaces(camera, this.config.worldRadius, this.config.atmosphereHeight);
 
+    pass.setIndexBuffer(this.terrainIndexBuffer, "uint32");
     pass.setPipeline(this.planetRenderPipeline);
     pass.setBindGroup(0, this.planetFrameBindGroup);
     pass.setBindGroup(1, this.planetTerrainBindGroup);
-    pass.drawIndexed(this.terrainIndexCount, 1, 0, 0, 0);
+    this.drawTerrainFaces(pass, visibleFaces);
 
     pass.setPipeline(this.oceanRenderPipeline);
     pass.setBindGroup(0, this.oceanFrameBindGroup);
     pass.setBindGroup(1, this.oceanTerrainBindGroup);
-    pass.drawIndexed(this.terrainIndexCount, 1, 0, 0, 0);
+    this.drawTerrainFaces(pass, visibleFaces);
 
     pass.setPipeline(this.airplaneRenderPipeline);
     pass.setBindGroup(0, this.airplaneFrameBindGroup);
@@ -517,8 +529,20 @@ export class GpuBridge {
     pass.setBindGroup(1, this.cloudRenderBindGroup);
     pass.draw(6, this.cloudParticleCount, 0, 0);
 
+    pass.setPipeline(this.atmosphereRenderPipeline);
+    pass.setBindGroup(0, this.atmosphereFrameBindGroup);
+    pass.setBindGroup(1, this.atmosphereTerrainBindGroup);
+    this.drawTerrainFaces(pass, visibleFaces);
+
     pass.end();
     this.device.queue.submit([encoder.finish()]);
+  }
+
+  private drawTerrainFaces(pass: GPURenderPassEncoder, visibleFaces: readonly number[]): void {
+    for (let i = 0; i < visibleFaces.length; i++) {
+      const firstIndex = visibleFaces[i] * this.terrainFaceIndexCount;
+      pass.drawIndexed(this.terrainFaceIndexCount, 1, firstIndex, 0, 0);
+    }
   }
 
   private writeTerrainParams(): void {
@@ -697,6 +721,42 @@ function buildParticleData(config: EngineConfig): Float32Array {
     data[base + 15] = 0;
   }
   return data;
+}
+
+const FACE_NORMALS: ReadonlyArray<readonly [number, number, number]> = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+];
+
+function getVisibleTerrainFaces(camera: CameraState, worldRadius: number, atmosphereHeight: number): number[] {
+  const cameraLen = Math.hypot(camera.position[0], camera.position[1], camera.position[2]) || 1;
+  const radialX = camera.position[0] / cameraLen;
+  const radialY = camera.position[1] / cameraLen;
+  const radialZ = camera.position[2] / cameraLen;
+  const faceScores: Array<{ face: number; score: number }> = [];
+  const horizonBias = Math.min(atmosphereHeight / Math.max(worldRadius, 1), 0.12);
+
+  for (let face = 0; face < FACE_NORMALS.length; face++) {
+    const normal = FACE_NORMALS[face];
+    const radialScore = normal[0] * radialX + normal[1] * radialY + normal[2] * radialZ;
+    const forwardScore =
+      normal[0] * camera.forward[0] +
+      normal[1] * camera.forward[1] +
+      normal[2] * camera.forward[2];
+    const score = radialScore * 0.75 + forwardScore * 0.25;
+    if (radialScore > -0.32 - horizonBias || forwardScore > -0.18) {
+      faceScores.push({ face, score });
+    }
+  }
+
+  faceScores.sort((a, b) => b.score - a.score);
+  const maxFaces = 3;
+  const visibleFaces = faceScores.slice(0, maxFaces).map((entry) => entry.face);
+  return visibleFaces.length > 0 ? visibleFaces : [0, 2, 4];
 }
 
 function hash01(value: number): number {
