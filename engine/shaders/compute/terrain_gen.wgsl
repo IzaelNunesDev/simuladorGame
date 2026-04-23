@@ -100,15 +100,52 @@ fn snoise(v: vec3f) -> f32 {
 // =============================================================================
 fn fractalNoise(pos: vec3f) -> f32 {
   var noise = 0.0;
-  var amplitude = params.baseAmp;
+  var amplitude = 1.0;
   var frequency = params.baseFreq;
+  var amplitudeSum = 0.0;
 
   for (var i = 0u; i < params.octaves; i++) {
-    noise += (snoise(pos * frequency + vec3f(params.seed)) * 2.0 - 1.0) * amplitude;
+    noise += snoise(pos * frequency + vec3f(params.seed)) * amplitude;
+    amplitudeSum += amplitude;
     amplitude *= params.persistence;
     frequency *= params.lacunarity;
   }
-  return noise;
+  return noise / max(amplitudeSum, 0.0001);
+}
+
+fn ridgedNoise(pos: vec3f) -> f32 {
+  var value = 0.0;
+  var amplitude = 1.0;
+  var frequency = params.baseFreq * 1.35;
+  var amplitudeSum = 0.0;
+
+  for (var i = 0u; i < params.octaves; i++) {
+    let sampleValue = 1.0 - abs(snoise(pos * frequency + vec3f(params.seed * 1.91)));
+    value += sampleValue * sampleValue * amplitude;
+    amplitudeSum += amplitude;
+    amplitude *= params.persistence;
+    frequency *= params.lacunarity;
+  }
+  return value / max(amplitudeSum, 0.0001);
+}
+
+fn terrainHeight(pos: vec3f) -> f32 {
+  let warp = vec3f(
+    snoise(pos * params.baseFreq * 0.22 + vec3f(params.seed, 0.0, 0.0)),
+    snoise(pos.zxy * params.baseFreq * 0.24 + vec3f(0.0, params.seed * 1.3, 0.0)),
+    snoise(pos.yzx * params.baseFreq * 0.2 + vec3f(0.0, 0.0, params.seed * 1.7))
+  );
+  let warped = normalize(pos + warp * 0.22);
+
+  let continents = smoothstep(0.48, 0.86, fractalNoise(warped * 0.42) * 0.5 + 0.5);
+  let hills = fractalNoise(warped * 1.35) * 0.5 + 0.5;
+  let mountains = ridgedNoise(warped * 2.4);
+  let details = fractalNoise(warped * 5.25) * 0.5 + 0.5;
+
+  let macroHeight = mix(hills * 0.18, hills * 0.38 + mountains * 0.92, continents);
+  let detailHeight = details * 0.09 + mountains * continents * 0.28;
+  let combined = (macroHeight + detailHeight) * continents;
+  return max(combined * params.baseAmp, 0.0);
 }
 
 // =============================================================================
@@ -141,8 +178,8 @@ fn sphereToUV(p: vec3f) -> vec2f {
 // Get displaced position on sphere with terrain height
 // =============================================================================
 fn getDisplacedPos(sphereDir: vec3f) -> vec3f {
-  let height = fractalNoise(sphereDir);
-  return sphereDir * (params.worldRadius + max(height, 0.0));
+  let height = terrainHeight(sphereDir);
+  return sphereDir * (params.worldRadius + height);
 }
 
 // =============================================================================
@@ -174,9 +211,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   let sphereDir = normalize(cubeToSphere(cubePoint));
-  let height = fractalNoise(sphereDir);
-  let clampedHeight = max(height, 0.0);
-  let worldPos = sphereDir * (params.worldRadius + clampedHeight);
+  let height = terrainHeight(sphereDir);
+  let worldPos = sphereDir * (params.worldRadius + height);
 
   // --- Normal Calculation via Neighboring Samples (Sobel/Cross Product) ---
   let eps = 0.001; // angular offset for sampling neighbors
@@ -209,5 +245,5 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // Write outputs
   outPositions[idx] = vec4f(worldPos, 1.0);
   outNormals[idx]   = vec4f(normalVec, 0.0);
-  outHeights[idx]   = clampedHeight;
+  outHeights[idx]   = height;
 }

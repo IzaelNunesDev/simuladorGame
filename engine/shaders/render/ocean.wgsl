@@ -12,6 +12,10 @@ struct FrameUniforms {
   deltaTime: f32,
   worldRadius: f32,
   seaLevel: f32,
+  atmosphereHeight: f32,
+  flyHeight: f32,
+  pad0: f32,
+  pad1: f32,
 };
 
 struct TerrainParams {
@@ -30,6 +34,8 @@ struct VertexOut {
   @location(0) worldPos: vec3f,
   @location(1) normal: vec3f,
   @location(2) uv: vec2f,
+  @location(3) terrainHeight: f32,
+  @location(4) wave: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -50,17 +56,22 @@ fn sphereToUV(p: vec3f) -> vec2f {
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
   let sphereDir = normalize(terrainPositions[vertexIndex].xyz);
+  let terrainNormal = normalize(terrainNormals[vertexIndex].xyz);
+  let terrainHeight = terrainHeights[vertexIndex];
   let uv = sphereToUV(sphereDir);
   let waveA = sin(frame.time * 0.75 + uv.x * 48.0 + uv.y * 21.0);
   let waveB = sin(frame.time * 1.15 - uv.x * 31.0 + uv.y * 37.0);
   let wave = (waveA + waveB) * 0.45;
-  let radius = terrain.worldRadius + frame.seaLevel + wave;
+  let shorelineDamp = 1.0 - smoothstep(frame.seaLevel - 1.0, frame.seaLevel + 8.0, terrainHeight);
+  let radius = terrain.worldRadius + frame.seaLevel + wave * shorelineDamp;
   let worldPos = sphereDir * radius;
 
   var out: VertexOut;
   out.worldPos = worldPos;
-  out.normal = sphereDir;
+  out.normal = normalize(mix(sphereDir, terrainNormal, 0.08));
   out.uv = uv;
+  out.terrainHeight = terrainHeight;
+  out.wave = wave;
   out.clipPosition = frame.viewProjection * vec4f(worldPos, 1.0);
   return out;
 }
@@ -82,6 +93,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let shallow = vec3f(0.08, 0.36, 0.58);
   let waterCol = mix(deep, shallow, diffuse * 0.65 + fresnel * 0.35);
   let highlight = vec3f(1.0, 0.95, 0.82) * specularHighlight;
+  let coastalDepth = max(frame.seaLevel - in.terrainHeight, 0.0);
+  let foamWave = sin(in.uv.x * 96.0 + frame.time * 2.7 + in.wave * 1.4)
+    + sin(in.uv.y * 78.0 - frame.time * 2.2)
+    + sin((in.uv.x + in.uv.y) * 64.0 + frame.time * 1.8);
+  let foamDistortion = foamWave * 0.22;
+  let foamMask = 1.0 - smoothstep(0.15, 3.8, coastalDepth + foamDistortion);
+  let foam = vec3f(1.0, 1.0, 1.0) * foamMask * (0.75 + diffuse * 0.25);
 
-  return vec4f(waterCol + highlight, 0.72);
+  return vec4f(waterCol + highlight + foam, 0.72);
 }

@@ -12,6 +12,10 @@ struct FrameUniforms {
   deltaTime: f32,
   worldRadius: f32,
   seaLevel: f32,
+  atmosphereHeight: f32,
+  flyHeight: f32,
+  pad0: f32,
+  pad1: f32,
 };
 
 struct TerrainParams {
@@ -40,7 +44,13 @@ struct VertexOut {
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
   let sphereDir = normalize(terrainPositions[vertexIndex].xyz);
-  let worldPos = sphereDir * (terrain.worldRadius + 34.0);
+  let terrainNormal = normalize(terrainNormals[vertexIndex].xyz);
+  let terrainHeight = terrainHeights[vertexIndex];
+  let atmosphereOffset =
+    frame.atmosphereHeight +
+    terrainHeight * 0.04 +
+    max(dot(terrainNormal, sphereDir), 0.0) * 1.5;
+  let worldPos = sphereDir * (terrain.worldRadius + atmosphereOffset);
 
   var out: VertexOut;
   out.worldPos = worldPos;

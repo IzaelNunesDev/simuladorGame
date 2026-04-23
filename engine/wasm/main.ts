@@ -19,22 +19,22 @@ export interface MiniEngineBootstrap {
 }
 
 const DEFAULT_CONFIG: EngineConfig = {
-  terrainResolution: 96,
-  worldRadius: 280,
-  flyHeight: 26,
-  seaLevel: 4,
-  atmosphereHeight: 34,
+  terrainResolution: 256,
+  worldRadius: 3000,
+  flyHeight: 120,
+  seaLevel: 18,
+  atmosphereHeight: 260,
   particleCount: 4096,
-  cloudCollisionRadius: 24,
-  cloudRelaxToHome: 0.35,
-  cloudBillboardSize: 4.5,
-  cloudStrength: 0.78,
+  cloudCollisionRadius: 72,
+  cloudRelaxToHome: 0.18,
+  cloudBillboardSize: 18,
+  cloudStrength: 0.82,
   terrainNoise: {
     octaves: 5,
     persistence: 0.52,
     lacunarity: 2.15,
     baseFrequency: 1.75,
-    baseAmplitude: 18,
+    baseAmplitude: 150,
     seed: 11.5,
   },
 };
@@ -183,6 +183,7 @@ export class MiniEngine {
 
     this.bridge.updateFrameUniforms(this.camera, this.sunDirection, timeMs * 0.001, deltaTime);
     this.bridge.updateCloudUniforms(this.player, deltaTime);
+    this.bridge.updateAirplaneUniforms(this.player);
     this.bridge.render(this.context.getCurrentTexture().createView());
 
     requestAnimationFrame(this.animationFrame);

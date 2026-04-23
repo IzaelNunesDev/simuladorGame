@@ -32,10 +32,13 @@ export interface ShaderLibrary {
   atmosphereRender: string;
   cloudsCompute: string;
   cloudsRender: string;
+  airplaneRender: string;
 }
 
-const FRAME_UNIFORM_FLOATS = 36;
-const CLOUD_UNIFORM_FLOATS = 16;
+const FRAME_UNIFORM_FLOATS = 40;
+const CLOUD_UNIFORM_FLOATS = 20;
+const AIRPLANE_UNIFORM_FLOATS = 20;
+const AIRPLANE_VERTEX_COUNT = 51;
 const PARTICLE_STRIDE_FLOATS = 16;
 const TERRAIN_PARAM_BYTES = 32;
 
@@ -50,11 +53,13 @@ export class GpuBridge {
 
   private readonly frameUniformData = new Float32Array(FRAME_UNIFORM_FLOATS);
   private readonly cloudUniformData = new Float32Array(CLOUD_UNIFORM_FLOATS);
+  private readonly airplaneUniformData = new Float32Array(AIRPLANE_UNIFORM_FLOATS);
   private readonly terrainParamBytes = new ArrayBuffer(TERRAIN_PARAM_BYTES);
 
   private readonly frameUniformBuffer: GPUBuffer;
   private readonly terrainParamBuffer: GPUBuffer;
   private readonly cloudParamBuffer: GPUBuffer;
+  private readonly airplaneUniformBuffer: GPUBuffer;
   private readonly terrainPositionBuffer: GPUBuffer;
   private readonly terrainNormalBuffer: GPUBuffer;
   private readonly terrainHeightBuffer: GPUBuffer;
@@ -67,17 +72,20 @@ export class GpuBridge {
   private readonly oceanRenderPipeline: GPURenderPipeline;
   private readonly atmosphereRenderPipeline: GPURenderPipeline;
   private readonly cloudsRenderPipeline: GPURenderPipeline;
+  private readonly airplaneRenderPipeline: GPURenderPipeline;
 
   private readonly atmosphereFrameBindGroup: GPUBindGroup;
   private readonly planetFrameBindGroup: GPUBindGroup;
   private readonly oceanFrameBindGroup: GPUBindGroup;
   private readonly cloudsFrameBindGroup: GPUBindGroup;
+  private readonly airplaneFrameBindGroup: GPUBindGroup;
   private readonly terrainComputeBindGroup: GPUBindGroup;
   private readonly atmosphereTerrainBindGroup: GPUBindGroup;
   private readonly planetTerrainBindGroup: GPUBindGroup;
   private readonly oceanTerrainBindGroup: GPUBindGroup;
   private readonly cloudComputeBindGroup: GPUBindGroup;
   private readonly cloudRenderBindGroup: GPUBindGroup;
+  private readonly airplaneUniformBindGroup: GPUBindGroup;
 
   private depthTexture: GPUTexture | null = null;
   private depthTextureView: GPUTextureView | null = null;
@@ -92,6 +100,7 @@ export class GpuBridge {
     frameUniformBuffer: GPUBuffer,
     terrainParamBuffer: GPUBuffer,
     cloudParamBuffer: GPUBuffer,
+    airplaneUniformBuffer: GPUBuffer,
     terrainPositionBuffer: GPUBuffer,
     terrainNormalBuffer: GPUBuffer,
     terrainHeightBuffer: GPUBuffer,
@@ -103,16 +112,19 @@ export class GpuBridge {
     oceanRenderPipeline: GPURenderPipeline,
     atmosphereRenderPipeline: GPURenderPipeline,
     cloudsRenderPipeline: GPURenderPipeline,
+    airplaneRenderPipeline: GPURenderPipeline,
     atmosphereFrameBindGroup: GPUBindGroup,
     planetFrameBindGroup: GPUBindGroup,
     oceanFrameBindGroup: GPUBindGroup,
     cloudsFrameBindGroup: GPUBindGroup,
+    airplaneFrameBindGroup: GPUBindGroup,
     terrainComputeBindGroup: GPUBindGroup,
     atmosphereTerrainBindGroup: GPUBindGroup,
     planetTerrainBindGroup: GPUBindGroup,
     oceanTerrainBindGroup: GPUBindGroup,
     cloudComputeBindGroup: GPUBindGroup,
     cloudRenderBindGroup: GPUBindGroup,
+    airplaneUniformBindGroup: GPUBindGroup,
   ) {
     this.device = device;
     this.format = format;
@@ -123,6 +135,7 @@ export class GpuBridge {
     this.frameUniformBuffer = frameUniformBuffer;
     this.terrainParamBuffer = terrainParamBuffer;
     this.cloudParamBuffer = cloudParamBuffer;
+    this.airplaneUniformBuffer = airplaneUniformBuffer;
     this.terrainPositionBuffer = terrainPositionBuffer;
     this.terrainNormalBuffer = terrainNormalBuffer;
     this.terrainHeightBuffer = terrainHeightBuffer;
@@ -134,16 +147,19 @@ export class GpuBridge {
     this.oceanRenderPipeline = oceanRenderPipeline;
     this.atmosphereRenderPipeline = atmosphereRenderPipeline;
     this.cloudsRenderPipeline = cloudsRenderPipeline;
+    this.airplaneRenderPipeline = airplaneRenderPipeline;
     this.atmosphereFrameBindGroup = atmosphereFrameBindGroup;
     this.planetFrameBindGroup = planetFrameBindGroup;
     this.oceanFrameBindGroup = oceanFrameBindGroup;
     this.cloudsFrameBindGroup = cloudsFrameBindGroup;
+    this.airplaneFrameBindGroup = airplaneFrameBindGroup;
     this.terrainComputeBindGroup = terrainComputeBindGroup;
     this.atmosphereTerrainBindGroup = atmosphereTerrainBindGroup;
     this.planetTerrainBindGroup = planetTerrainBindGroup;
     this.oceanTerrainBindGroup = oceanTerrainBindGroup;
     this.cloudComputeBindGroup = cloudComputeBindGroup;
     this.cloudRenderBindGroup = cloudRenderBindGroup;
+    this.airplaneUniformBindGroup = airplaneUniformBindGroup;
   }
 
   static async create(
@@ -170,6 +186,10 @@ export class GpuBridge {
 
     const cloudParamBuffer = device.createBuffer({
       size: CLOUD_UNIFORM_FLOATS * 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const airplaneUniformBuffer = device.createBuffer({
+      size: AIRPLANE_UNIFORM_FLOATS * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -222,6 +242,7 @@ export class GpuBridge {
     const oceanRenderPipeline = createRenderPipeline(device, format, shaders.oceanRender, "vs_main", "fs_main", true);
     const atmosphereRenderPipeline = createRenderPipeline(device, format, shaders.atmosphereRender, "vs_main", "fs_main", true);
     const cloudsRenderPipeline = createRenderPipeline(device, format, shaders.cloudsRender, "vs_main", "fs_main", true);
+    const airplaneRenderPipeline = createRenderPipeline(device, format, shaders.airplaneRender, "vs_main", "fs_main");
 
     const atmosphereFrameBindGroup = device.createBindGroup({
       layout: atmosphereRenderPipeline.getBindGroupLayout(0),
@@ -237,6 +258,10 @@ export class GpuBridge {
     });
     const cloudsFrameBindGroup = device.createBindGroup({
       layout: cloudsRenderPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: frameUniformBuffer } }],
+    });
+    const airplaneFrameBindGroup = device.createBindGroup({
+      layout: airplaneRenderPipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: frameUniformBuffer } }],
     });
 
@@ -295,6 +320,10 @@ export class GpuBridge {
         { binding: 1, resource: { buffer: particleBuffer } },
       ],
     });
+    const airplaneUniformBindGroup = device.createBindGroup({
+      layout: airplaneRenderPipeline.getBindGroupLayout(1),
+      entries: [{ binding: 0, resource: { buffer: airplaneUniformBuffer } }],
+    });
 
     const bridge = new GpuBridge(
       device,
@@ -306,6 +335,7 @@ export class GpuBridge {
       frameUniformBuffer,
       terrainParamBuffer,
       cloudParamBuffer,
+      airplaneUniformBuffer,
       terrainPositionBuffer,
       terrainNormalBuffer,
       terrainHeightBuffer,
@@ -317,16 +347,19 @@ export class GpuBridge {
       oceanRenderPipeline,
       atmosphereRenderPipeline,
       cloudsRenderPipeline,
+      airplaneRenderPipeline,
       atmosphereFrameBindGroup,
       planetFrameBindGroup,
       oceanFrameBindGroup,
       cloudsFrameBindGroup,
+      airplaneFrameBindGroup,
       terrainComputeBindGroup,
       atmosphereTerrainBindGroup,
       planetTerrainBindGroup,
       oceanTerrainBindGroup,
       cloudComputeBindGroup,
       cloudRenderBindGroup,
+      airplaneUniformBindGroup,
     );
 
     bridge.writeTerrainParams();
@@ -358,6 +391,10 @@ export class GpuBridge {
     this.frameUniformData[33] = deltaTime;
     this.frameUniformData[34] = this.config.worldRadius;
     this.frameUniformData[35] = this.config.seaLevel;
+    this.frameUniformData[36] = this.config.atmosphereHeight;
+    this.frameUniformData[37] = this.config.flyHeight;
+    this.frameUniformData[38] = 0;
+    this.frameUniformData[39] = 0;
     this.device.queue.writeBuffer(this.frameUniformBuffer, 0, this.frameUniformData);
   }
 
@@ -372,7 +409,57 @@ export class GpuBridge {
     this.cloudUniformData[13] = this.config.cloudBillboardSize;
     this.cloudUniformData[14] = this.config.cloudStrength;
     this.cloudUniformData[15] = 0.985;
+    this.cloudUniformData[16] = 0;
+    this.cloudUniformData[17] = 0;
+    this.cloudUniformData[18] = 0;
+    this.cloudUniformData[19] = 0;
     this.device.queue.writeBuffer(this.cloudParamBuffer, 0, this.cloudUniformData);
+  }
+
+  updateAirplaneUniforms(player: PlayerState): void {
+    const bankAngle = player.rollBank * 1.25;
+    const cosBank = Math.cos(bankAngle);
+    const sinBank = Math.sin(bankAngle);
+
+    const rolledRightX = player.right[0] * cosBank + player.up[0] * sinBank;
+    const rolledRightY = player.right[1] * cosBank + player.up[1] * sinBank;
+    const rolledRightZ = player.right[2] * cosBank + player.up[2] * sinBank;
+    const rolledUpX = player.up[0] * cosBank - player.right[0] * sinBank;
+    const rolledUpY = player.up[1] * cosBank - player.right[1] * sinBank;
+    const rolledUpZ = player.up[2] * cosBank - player.right[2] * sinBank;
+
+    const scale = Math.max(this.config.flyHeight * 0.012, 1.35);
+    const offsetForward = scale * 5.5;
+    const offsetDown = scale * 0.65;
+    const planePosX = player.position[0] + player.forward[0] * offsetForward - rolledUpX * offsetDown;
+    const planePosY = player.position[1] + player.forward[1] * offsetForward - rolledUpY * offsetDown;
+    const planePosZ = player.position[2] + player.forward[2] * offsetForward - rolledUpZ * offsetDown;
+
+    this.airplaneUniformData[0] = rolledRightX * scale;
+    this.airplaneUniformData[1] = rolledRightY * scale;
+    this.airplaneUniformData[2] = rolledRightZ * scale;
+    this.airplaneUniformData[3] = 0;
+
+    this.airplaneUniformData[4] = rolledUpX * scale;
+    this.airplaneUniformData[5] = rolledUpY * scale;
+    this.airplaneUniformData[6] = rolledUpZ * scale;
+    this.airplaneUniformData[7] = 0;
+
+    this.airplaneUniformData[8] = player.forward[0] * scale;
+    this.airplaneUniformData[9] = player.forward[1] * scale;
+    this.airplaneUniformData[10] = player.forward[2] * scale;
+    this.airplaneUniformData[11] = 0;
+
+    this.airplaneUniformData[12] = planePosX;
+    this.airplaneUniformData[13] = planePosY;
+    this.airplaneUniformData[14] = planePosZ;
+    this.airplaneUniformData[15] = 1;
+
+    this.airplaneUniformData[16] = 0.92;
+    this.airplaneUniformData[17] = 0.74;
+    this.airplaneUniformData[18] = 0.18;
+    this.airplaneUniformData[19] = 1;
+    this.device.queue.writeBuffer(this.airplaneUniformBuffer, 0, this.airplaneUniformData);
   }
 
   render(currentTextureView: GPUTextureView): void {
@@ -420,6 +507,11 @@ export class GpuBridge {
     pass.setBindGroup(0, this.oceanFrameBindGroup);
     pass.setBindGroup(1, this.oceanTerrainBindGroup);
     pass.drawIndexed(this.terrainIndexCount, 1, 0, 0, 0);
+
+    pass.setPipeline(this.airplaneRenderPipeline);
+    pass.setBindGroup(0, this.airplaneFrameBindGroup);
+    pass.setBindGroup(1, this.airplaneUniformBindGroup);
+    pass.draw(AIRPLANE_VERTEX_COUNT, 1, 0, 0);
 
     pass.setPipeline(this.cloudsRenderPipeline);
     pass.setBindGroup(0, this.cloudsFrameBindGroup);
@@ -535,23 +627,55 @@ function buildTerrainIndexBuffer(resolution: number): Uint32Array {
 
 function buildParticleData(config: EngineConfig): Float32Array {
   const data = new Float32Array(config.particleCount * PARTICLE_STRIDE_FLOATS);
-  const cloudRadius = config.worldRadius + config.flyHeight * 0.7;
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const clusterCount = 28;
+  const baseCloudRadius = config.worldRadius + config.flyHeight * 0.55;
+  const clusterSpread = config.flyHeight * 0.55;
 
   for (let i = 0; i < config.particleCount; i++) {
-    const t = (i + 0.5) / config.particleCount;
-    const y = 1 - 2 * t;
-    const radial = Math.sqrt(Math.max(0, 1 - y * y));
-    const theta = goldenAngle * i;
-    const dx = Math.cos(theta) * radial;
-    const dz = Math.sin(theta) * radial;
-    const jitter = Math.sin(i * 17.13) * 8 + Math.cos(i * 3.7) * 4;
-    const radius = cloudRadius + jitter;
-    const base = i * PARTICLE_STRIDE_FLOATS;
+    const clusterIndex = i % clusterCount;
+    const clusterSeed = clusterIndex * 23.173 + 11.7;
+    const particleSeed = i * 17.13 + clusterIndex * 5.31;
 
-    const px = dx * radius;
-    const py = y * radius;
-    const pz = dz * radius;
+    const centerPhi = fract(hash01(clusterSeed * 1.17) * Math.PI * 2);
+    const centerCosTheta = hash01(clusterSeed * 2.31) * 2 - 1;
+    const centerSinTheta = Math.sqrt(Math.max(0, 1 - centerCosTheta * centerCosTheta));
+    const centerX = Math.cos(centerPhi) * centerSinTheta;
+    const centerY = centerCosTheta;
+    const centerZ = Math.sin(centerPhi) * centerSinTheta;
+
+    const worldUpX = Math.abs(centerY) < 0.92 ? 0 : 1;
+    const worldUpY = Math.abs(centerY) < 0.92 ? 1 : 0;
+    const worldUpZ = 0;
+
+    let tangentX = worldUpY * centerZ - worldUpZ * centerY;
+    let tangentY = worldUpZ * centerX - worldUpX * centerZ;
+    let tangentZ = worldUpX * centerY - worldUpY * centerX;
+    let tangentLen = Math.hypot(tangentX, tangentY, tangentZ);
+    if (tangentLen < 1e-5) {
+      tangentX = 1;
+      tangentY = 0;
+      tangentZ = 0;
+      tangentLen = 1;
+    }
+    tangentX /= tangentLen;
+    tangentY /= tangentLen;
+    tangentZ /= tangentLen;
+
+    let bitangentX = centerY * tangentZ - centerZ * tangentY;
+    let bitangentY = centerZ * tangentX - centerX * tangentZ;
+    let bitangentZ = centerX * tangentY - centerY * tangentX;
+
+    const angle = hash01(particleSeed * 0.73) * Math.PI * 2;
+    const radial = Math.pow(hash01(particleSeed * 1.91), 0.72) * clusterSpread;
+    const shellOffset = (hash01(particleSeed * 2.77) - 0.5) * config.flyHeight * 0.18;
+    const centerRadius = baseCloudRadius + (hash01(clusterSeed * 4.13) - 0.5) * config.flyHeight * 0.8;
+
+    const localX = Math.cos(angle) * radial;
+    const localY = Math.sin(angle) * radial;
+    const px = centerX * (centerRadius + shellOffset) + tangentX * localX + bitangentX * localY;
+    const py = centerY * (centerRadius + shellOffset) + tangentY * localX + bitangentY * localY;
+    const pz = centerZ * (centerRadius + shellOffset) + tangentZ * localX + bitangentZ * localY;
+    const base = i * PARTICLE_STRIDE_FLOATS;
 
     data[base + 0] = px;
     data[base + 1] = py;
@@ -568,10 +692,19 @@ function buildParticleData(config: EngineConfig): Float32Array {
     data[base + 10] = pz;
     data[base + 11] = 1;
 
-    data[base + 12] = theta;
-    data[base + 13] = jitter;
+    data[base + 12] = clusterIndex;
+    data[base + 13] = radial;
     data[base + 14] = 0;
     data[base + 15] = 0;
   }
   return data;
+}
+
+function hash01(value: number): number {
+  const x = Math.sin(value * 127.1) * 43758.5453123;
+  return x - Math.floor(x);
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value);
 }

@@ -12,6 +12,10 @@ struct FrameUniforms {
   deltaTime: f32,
   worldRadius: f32,
   seaLevel: f32,
+  atmosphereHeight: f32,
+  flyHeight: f32,
+  pad0: f32,
+  pad1: f32,
 };
 
 struct CloudParams {

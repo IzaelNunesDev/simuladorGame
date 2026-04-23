@@ -1,13 +1,13 @@
 import { createMiniEngine } from "../wasm/main";
 
-async function loadText(relativePath: string): Promise<string> {
-  const url = new URL(relativePath, import.meta.url);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Falha ao carregar shader: ${relativePath}`);
-  }
-  return response.text();
-}
+// Importando os shaders diretamente pelo Vite
+import terrainComputeRaw from "../shaders/compute/terrain_gen.wgsl?raw";
+import cloudsComputeRaw from "../shaders/compute/clouds_sim.wgsl?raw";
+import planetRenderRaw from "../shaders/render/planet.wgsl?raw";
+import oceanRenderRaw from "../shaders/render/ocean.wgsl?raw";
+import atmosphereRenderRaw from "../shaders/render/atmosphere.wgsl?raw";
+import cloudsRenderRaw from "../shaders/render/clouds.wgsl?raw";
+import airplaneRenderRaw from "../shaders/render/airplane.wgsl?raw";
 
 async function bootstrap(): Promise<void> {
   if (!("gpu" in navigator)) {
@@ -38,12 +38,13 @@ async function bootstrap(): Promise<void> {
   });
 
   const shaders = {
-    terrainCompute: await loadText("../shaders/compute/terrain_gen.wgsl"),
-    cloudsCompute: await loadText("../shaders/compute/clouds_sim.wgsl"),
-    planetRender: await loadText("../shaders/render/planet.wgsl"),
-    oceanRender: await loadText("../shaders/render/ocean.wgsl"),
-    atmosphereRender: await loadText("../shaders/render/atmosphere.wgsl"),
-    cloudsRender: await loadText("../shaders/render/clouds.wgsl"),
+    terrainCompute: terrainComputeRaw,
+    cloudsCompute: cloudsComputeRaw,
+    planetRender: planetRenderRaw,
+    oceanRender: oceanRenderRaw,
+    atmosphereRender: atmosphereRenderRaw,
+    cloudsRender: cloudsRenderRaw,
+    airplaneRender: airplaneRenderRaw,
   };
 
   const engine = await createMiniEngine({

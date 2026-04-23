@@ -44,12 +44,12 @@ export function createCameraState(): CameraState {
     viewMatrix: mat4(),
     projectionMatrix: mat4(),
     viewProjectionMatrix: mat4(),
-    distance: 38,
-    height: 10,
+    distance: 12,
+    height: 3,
     lookAhead: 20,
-    fovY: 55 * DEG_TO_RAD,
+    fovY: 75 * DEG_TO_RAD,
     nearPlane: 0.1,
-    farPlane: 4000,
+    farPlane: 20000,
     _scratchForward: vec3(),
   };
 }
