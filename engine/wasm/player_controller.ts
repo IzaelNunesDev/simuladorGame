@@ -16,7 +16,7 @@ import {
   vec3Dot,
 } from "./math";
 import type { TerrainNoiseSettings } from "./gpu_bridge";
-import { getTerrainHeight } from "./noise";
+import type { TerrainQuery } from "./terrain_query";
 
 export interface PlayerInputState {
   pitch: number;
@@ -29,6 +29,7 @@ export interface PlayerInputState {
 export interface PlayerState {
   worldCenter: Vec3;
   position: Vec3;
+  surfaceDirection: Vec3;
   forward: Vec3;
   right: Vec3;
   up: Vec3;
@@ -36,7 +37,8 @@ export interface PlayerState {
   gravityUp: Vec3;
   previousPosition: Vec3;
   worldRadius: number;
-  flyHeight: number;
+  altitude: number;
+  pitchAngle: number;
   speed: number;
   minSpeed: number;
   maxSpeed: number;
@@ -60,16 +62,18 @@ export function createPlayerInputState(): PlayerInputState {
   };
 }
 
-export function createPlayerState(worldRadius: number, flyHeight: number): PlayerState {
-  const orbitRadius = worldRadius + flyHeight;
+export function createPlayerState(worldRadius: number, initialAltitude: number): PlayerState {
+  const orbitRadius = worldRadius + initialAltitude;
   const position = vec3(orbitRadius, 0, 0);
   const gravityUp = vec3(1, 0, 0);
+  const surfaceDirection = vec3Copy(vec3(), gravityUp);
   const forward = vec3(0, 0, -1);
   const right = vec3(0, -1, 0);
 
   return {
     worldCenter: vec3(),
     position,
+    surfaceDirection,
     forward,
     right,
     up: vec3Copy(vec3(), gravityUp),
@@ -77,7 +81,8 @@ export function createPlayerState(worldRadius: number, flyHeight: number): Playe
     gravityUp,
     previousPosition: vec3Copy(vec3(), position),
     worldRadius,
-    flyHeight,
+    altitude: initialAltitude,
+    pitchAngle: 0,
     speed: 42,
     minSpeed: 12,
     maxSpeed: 160,
@@ -96,10 +101,12 @@ export function updatePlayerController(
   player: PlayerState,
   input: PlayerInputState,
   deltaTime: number,
-  terrainNoise: TerrainNoiseSettings,
+  terrainQuery: TerrainQuery,
   seaLevel: number,
 ): PlayerState {
   const response = clamp(player.bankResponse * deltaTime, 0, 1);
+  
+  // Aceleração
   player.speed = clamp(
     player.speed + (input.throttle - input.brake) * player.acceleration * deltaTime,
     player.minSpeed,
@@ -108,82 +115,86 @@ export function updatePlayerController(
 
   vec3Copy(player.previousPosition, player.position);
   vec3Normalize(player.gravityUp, player.position);
+  vec3Copy(player.surfaceDirection, player.gravityUp);
+
+  // Bank/Roll
   player.rollBank += ((input.roll * 0.75) - player.rollBank) * response;
 
+  // Pitch explícito
+  player.pitchAngle += input.pitch * player.pitchRate * deltaTime;
+  const maxPitch = Math.PI / 2 * 0.85;
+  player.pitchAngle = clamp(player.pitchAngle, -maxPitch, maxPitch);
+
+  // Componentes de velocidade baseados no pitch
+  const forwardSpeed = Math.cos(player.pitchAngle) * player.speed;
+  const verticalVelocity = Math.sin(player.pitchAngle) * player.speed;
+
+  // Yaw coordenado com bank
   const coordinatedYaw = (input.yaw + player.rollBank * 0.8) * player.yawRate * deltaTime;
+
+  // Garantir que forward atual está no plano tangente
+  vec3ProjectOnPlane(player.forward, player.forward, player.gravityUp);
+  if (vec3LengthSq(player.forward) < 1e-6) {
+    // Fallback caso forward colapse
+    vec3Cross(player.forward, player.right, player.gravityUp);
+  }
+  vec3Normalize(player.forward, player.forward);
+
+  // Aplicar Yaw tangencial
   quatFromAxisAngle(player._rotationQuat, player.gravityUp, coordinatedYaw);
   vec3RotateByQuat(player.forward, player.forward, player._rotationQuat);
 
-  vec3Cross(player.right, player.forward, player.gravityUp);
-  if (vec3LengthSq(player.right) < 1e-6) {
-    vec3Cross(player.right, player.forward, player.up);
-  }
-  vec3Normalize(player.right, player.right);
-  vec3Cross(player.up, player.gravityUp, player.right);
-  vec3Normalize(player.up, player.up);
+  // Mover tangencialmente
+  vec3Scale(player._scratchA, player.forward, forwardSpeed * deltaTime);
+  vec3AddScaled(player.position, player.position, player._scratchA, 1.0);
+  vec3Normalize(player.gravityUp, player.position); // Re-ancorar na esfera
 
-  quatFromAxisAngle(player._rotationQuat, player.right, input.pitch * player.pitchRate * deltaTime);
-  vec3RotateByQuat(player.forward, player.forward, player._rotationQuat);
+  // Atualizar altitude
+  player.altitude += verticalVelocity * deltaTime;
+
+  // Colisão de terreno
+  const landHeight = terrainQuery.getHeight(player.gravityUp);
+  const minAltitude = Math.max(landHeight, seaLevel) + 2.0;
+
+  if (player.altitude < minAltitude) {
+    player.altitude = minAltitude;
+    // Bateu no chão: força nariz para cima gradualmente e perde vel
+    player.pitchAngle = Math.max(player.pitchAngle, 0); 
+    player.speed = clamp(player.speed * 0.98, player.minSpeed, player.maxSpeed);
+  }
+
+  // Reconstruir posição final absoluta
+  vec3Scale(player.position, player.gravityUp, player.worldRadius + player.altitude);
+
+  // Reconstruir matriz de rotação para render/câmera
+  vec3ProjectOnPlane(player.forward, player.forward, player.gravityUp);
   vec3Normalize(player.forward, player.forward);
 
-  let climbComponent = vec3Dot(player.forward, player.gravityUp);
-  if (Math.abs(climbComponent) > 0.98) {
-    vec3ProjectOnPlane(player.forward, player.forward, player.gravityUp);
-    vec3Normalize(player.forward, player.forward);
-    climbComponent = vec3Dot(player.forward, player.gravityUp);
-  }
-
   vec3Cross(player.right, player.forward, player.gravityUp);
-  if (vec3LengthSq(player.right) < 1e-6) {
-    vec3Cross(player.right, player.forward, player.up);
-  }
   vec3Normalize(player.right, player.right);
-  vec3Cross(player.up, player.gravityUp, player.right);
-  vec3Normalize(player.up, player.up);
 
+  vec3Copy(player.up, player.gravityUp);
+
+  // Aplicar Pitch nos eixos locais
+  quatFromAxisAngle(player._rotationQuat, player.right, player.pitchAngle);
+  vec3RotateByQuat(player.forward, player.forward, player._rotationQuat);
+  vec3RotateByQuat(player.up, player.up, player._rotationQuat);
+
+  // Aplicar Roll
   quatFromAxisAngle(player._rotationQuat, player.forward, player.rollBank);
   vec3RotateByQuat(player.right, player.right, player._rotationQuat);
   vec3RotateByQuat(player.up, player.up, player._rotationQuat);
+
+  vec3Normalize(player.forward, player.forward);
   vec3Normalize(player.right, player.right);
   vec3Normalize(player.up, player.up);
 
-  vec3Scale(player._scratchA, player.forward, player.speed * deltaTime);
-  vec3AddScaled(player.position, player.position, player._scratchA, 1);
-
-  vec3Normalize(player.gravityUp, player.position);
-  const landHeight = getTerrainHeight(player.gravityUp, terrainNoise);
-  const minRadius = player.worldRadius + Math.max(landHeight, seaLevel) + 2.0;
-  const desiredRadius = Math.max(player.worldRadius + player.flyHeight, minRadius);
-  let currentRadius = vec3Length(player.position);
-
-  if (currentRadius < minRadius) {
-    vec3Scale(player.position, player.gravityUp, minRadius);
-    player.speed = clamp(player.speed * 0.8, player.minSpeed, player.maxSpeed);
-    currentRadius = minRadius;
-  } else {
-    const altitudeError = desiredRadius - currentRadius;
-    vec3AddScaled(player.position, player.position, player.gravityUp, altitudeError * response * 0.22);
-    currentRadius = vec3Length(player.position);
-  }
-
-  vec3Normalize(player.gravityUp, player.position);
-  vec3Cross(player.right, player.forward, player.gravityUp);
-  if (vec3LengthSq(player.right) < 1e-6) {
-    vec3Cross(player.right, player.forward, player.up);
-  }
-  vec3Normalize(player.right, player.right);
-  vec3Cross(player.up, player.gravityUp, player.right);
-  vec3Normalize(player.up, player.up);
-  quatFromAxisAngle(player._rotationQuat, player.forward, player.rollBank);
-  vec3RotateByQuat(player.right, player.right, player._rotationQuat);
-  vec3RotateByQuat(player.up, player.up, player._rotationQuat);
-  vec3Normalize(player.right, player.right);
-  vec3Normalize(player.up, player.up);
-
+  // Velocity calculada para shaders
   vec3Copy(player._scratchB, player.position);
   player._scratchB[0] -= player.previousPosition[0];
   player._scratchB[1] -= player.previousPosition[1];
   player._scratchB[2] -= player.previousPosition[2];
   vec3Scale(player.velocity, player._scratchB, deltaTime > 0 ? 1 / deltaTime : 0);
+
   return player;
 }

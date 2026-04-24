@@ -9,6 +9,15 @@ import atmosphereRenderRaw from "../shaders/render/atmosphere.wgsl?raw";
 import cloudsRenderRaw from "../shaders/render/clouds.wgsl?raw";
 import airplaneRenderRaw from "../shaders/render/airplane.wgsl?raw";
 
+async function loadImageBitmapFromUrl(url: string): Promise<ImageBitmap> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Falha ao carregar textura base: ${response.status} ${response.statusText} (${url})`);
+  }
+  const blob = await response.blob();
+  return await createImageBitmap(blob);
+}
+
 async function bootstrap(): Promise<void> {
   if (!("gpu" in navigator)) {
     throw new Error("WebGPU nao esta disponivel neste navegador.");
@@ -47,12 +56,15 @@ async function bootstrap(): Promise<void> {
     airplaneRender: airplaneRenderRaw,
   };
 
+  const baseMapBitmap = await loadImageBitmapFromUrl('/base_map.png');
+
   const engine = await createMiniEngine({
     canvas,
     context,
     device,
     presentationFormat,
     shaders,
+    baseMapBitmap,
   });
 
   const onResize = (): void => engine.resize();

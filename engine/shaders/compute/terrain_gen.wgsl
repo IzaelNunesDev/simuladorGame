@@ -21,6 +21,8 @@ struct TerrainParams {
 @group(0) @binding(1) var<storage, read_write> outPositions : array<vec4f>;
 @group(0) @binding(2) var<storage, read_write> outNormals   : array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> outHeights   : array<f32>;
+@group(0) @binding(4) var baseMapSampler: sampler;
+@group(0) @binding(5) var baseMapTexture: texture_2d<f32>;
 
 // =============================================================================
 // Simplex Noise 3D — Translated from Ashima Arts / Stefan Gustavson
@@ -129,22 +131,68 @@ fn ridgedNoise(pos: vec3f) -> f32 {
   return value / max(amplitudeSum, 0.0001);
 }
 
+// =============================================================================
+// Sphere to UV mapping (longitude/latitude)
+// =============================================================================
+fn sphereToUV(p: vec3f) -> vec2f {
+  let n = normalize(p);
+  let longitude = atan2(n.x, -n.z);      // atan2(x, -z)
+  let latitude  = asin(clamp(n.y, -1.0, 1.0));
+  let u = (longitude / 3.14159265 + 1.0) * 0.5;
+  let v = latitude / 3.14159265 + 0.5;
+  return vec2f(u, v);
+}
+
 fn terrainHeight(pos: vec3f) -> f32 {
+  // 1. Domain Warping (Distorção simulando o fluxo de placas tectônicas)
   let warp = vec3f(
-    snoise(pos * params.baseFreq * 0.22 + vec3f(params.seed, 0.0, 0.0)),
-    snoise(pos.zxy * params.baseFreq * 0.24 + vec3f(0.0, params.seed * 1.3, 0.0)),
-    snoise(pos.yzx * params.baseFreq * 0.2 + vec3f(0.0, 0.0, params.seed * 1.7))
+    snoise(pos * params.baseFreq * 0.5 + vec3f(params.seed, 1.0, 0.0)),
+    snoise(pos.zxy * params.baseFreq * 0.5 + vec3f(0.0, params.seed, 1.0)),
+    snoise(pos.yzx * params.baseFreq * 0.5 + vec3f(1.0, 0.0, params.seed))
   );
-  let warped = normalize(pos + warp * 0.22);
+  let warped = normalize(pos + warp * 0.25);
 
-  let continents = smoothstep(0.48, 0.86, fractalNoise(warped * 0.42) * 0.5 + 0.5);
-  let hills = fractalNoise(warped * 1.35) * 0.5 + 0.5;
-  let mountains = ridgedNoise(warped * 2.4);
-  let details = fractalNoise(warped * 5.25) * 0.5 + 0.5;
+  // 2. Continentalness: Onde é terra e onde é mar (Via Textura)
+  let uv = sphereToUV(pos);
+  let color = textureSampleLevel(baseMapTexture, baseMapSampler, uv, 0.0);
+  
+  // Como as cores do mapa tem vermelho forte nos continentes e baixo no mar
+  let rawContinent = color.r; 
+  // Curva para garantir que o mar fique liso e a costa suba suave
+  let continentMask = smoothstep(0.15, 0.45, rawContinent);
 
-  let macroHeight = mix(hills * 0.18, hills * 0.38 + mountains * 0.92, continents);
-  let detailHeight = details * 0.09 + mountains * continents * 0.28;
-  let combined = (macroHeight + detailHeight) * continents;
+  // 3. Mapa de Biomas (Extensão Vasta)
+  // Frequência muito baixa para garantir que tenhamos PAÍSES inteiros de deserto
+  let biomeNoise = fractalNoise(warped * 0.25 + vec3f(params.seed * 3.0)) * 0.5 + 0.5;
+  
+  // Transições de bioma:
+  // < 0.40 = Planícies lisas / Desertos
+  // 0.40 a 0.60 = Colinas e Vales
+  // > 0.60 = Cordilheiras Rochosas
+  let hillMask = smoothstep(0.35, 0.45, biomeNoise);
+  let mountainMask = smoothstep(0.55, 0.65, biomeNoise); 
+
+  // 4. Tipos de Terreno
+  let details = fractalNoise(warped * 8.0) * 0.5 + 0.5; // Micro-relevo de pedras
+
+  // a. Desertos (Plano e liso)
+  let flatlands = details * 0.01; 
+  
+  // b. Colinas Onduladas
+  let hills = fractalNoise(warped * 1.5) * 0.5 + 0.5; 
+  let hillsRelief = (hills * 0.12) + (details * 0.02);
+
+  // c. Montanhas Afiadas
+  let mountains = ridgedNoise(warped * 3.0); 
+  let mountainsRelief = (mountains * 1.5) + (details * 0.05);
+
+  // 5. Misturando os 3 Relevos Baseado na Máscara de Bioma
+  var landRelief = mix(flatlands, hillsRelief, hillMask);
+  landRelief = mix(landRelief, mountainsRelief, mountainMask);
+
+  // 6. Aplicar o relevo apenas onde tem continente (base_map.png)
+  let combined = landRelief * continentMask;
+  
   return max(combined * params.baseAmp, 0.0);
 }
 
@@ -160,18 +208,6 @@ fn cubeToSphere(p: vec3f) -> vec3f {
     p.y * sqrt(1.0 - z2 * 0.5 - x2 * 0.5 + z2 * x2 / 3.0),
     p.z * sqrt(1.0 - x2 * 0.5 - y2 * 0.5 + x2 * y2 / 3.0)
   );
-}
-
-// =============================================================================
-// Sphere to UV mapping (longitude/latitude)
-// =============================================================================
-fn sphereToUV(p: vec3f) -> vec2f {
-  let n = normalize(p);
-  let longitude = atan2(n.x, -n.z);      // atan2(x, -z)
-  let latitude  = asin(clamp(n.y, -1.0, 1.0));
-  let u = (longitude / 3.14159265 + 1.0) * 0.5;
-  let v = latitude / 3.14159265 + 0.5;
-  return vec2f(u, v);
 }
 
 // =============================================================================

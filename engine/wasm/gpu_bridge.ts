@@ -35,7 +35,7 @@ export interface ShaderLibrary {
   airplaneRender: string;
 }
 
-const FRAME_UNIFORM_FLOATS = 40;
+const FRAME_UNIFORM_FLOATS = 44;
 const CLOUD_UNIFORM_FLOATS = 20;
 const AIRPLANE_UNIFORM_FLOATS = 20;
 const AIRPLANE_VERTEX_COUNT = 51;
@@ -195,6 +195,7 @@ export class GpuBridge {
     shaders: ShaderLibrary,
     canvasWidth: number,
     canvasHeight: number,
+    baseMapBitmap: ImageBitmap,
   ): Promise<GpuBridge> {
     const terrainVertexCount = config.terrainResolution * config.terrainResolution * 6;
     const terrainIndexData = buildTerrainIndexBuffer(config.terrainResolution);
@@ -203,6 +204,23 @@ export class GpuBridge {
     const frameUniformBuffer = device.createBuffer({
       size: FRAME_UNIFORM_FLOATS * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const baseMapTexture = device.createTexture({
+      size: [baseMapBitmap.width, baseMapBitmap.height, 1],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture(
+      { source: baseMapBitmap },
+      { texture: baseMapTexture },
+      [baseMapBitmap.width, baseMapBitmap.height]
+    );
+    const baseMapSampler = device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'clamp-to-edge',
+      addressModeV: 'clamp-to-edge',
     });
 
     const terrainParamBuffer = device.createBuffer({
@@ -298,6 +316,8 @@ export class GpuBridge {
         { binding: 1, resource: { buffer: terrainPositionBuffer } },
         { binding: 2, resource: { buffer: terrainNormalBuffer } },
         { binding: 3, resource: { buffer: terrainHeightBuffer } },
+        { binding: 4, resource: baseMapSampler },
+        { binding: 5, resource: baseMapTexture.createView() },
       ],
     });
 
@@ -406,20 +426,21 @@ export class GpuBridge {
     this.depthTextureView = this.depthTexture.createView();
   }
 
-  updateFrameUniforms(camera: CameraState, sunDirection: Vec3, time: number, deltaTime: number): void {
+  updateFrameUniforms(camera: CameraState, sunDirection: Vec3, playerPosition: Vec3, time: number, deltaTime: number): void {
     this.writeMat4(this.frameUniformData, 0, camera.viewProjectionMatrix);
     this.writeVec4(this.frameUniformData, 16, camera.position[0], camera.position[1], camera.position[2], 1);
     this.writeVec4(this.frameUniformData, 20, sunDirection[0], sunDirection[1], sunDirection[2], 0);
     this.writeVec4(this.frameUniformData, 24, camera.right[0], camera.right[1], camera.right[2], 0);
     this.writeVec4(this.frameUniformData, 28, camera.up[0], camera.up[1], camera.up[2], 0);
-    this.writeScalar(this.frameUniformData, 32, time);
-    this.writeScalar(this.frameUniformData, 33, deltaTime);
-    this.writeScalar(this.frameUniformData, 34, this.config.worldRadius);
-    this.writeScalar(this.frameUniformData, 35, this.config.seaLevel);
-    this.writeScalar(this.frameUniformData, 36, this.config.atmosphereHeight);
-    this.writeScalar(this.frameUniformData, 37, this.config.flyHeight);
-    this.writeScalar(this.frameUniformData, 38, 0);
-    this.writeScalar(this.frameUniformData, 39, 0);
+    this.writeVec4(this.frameUniformData, 32, playerPosition[0], playerPosition[1], playerPosition[2], 1);
+    this.writeScalar(this.frameUniformData, 36, time);
+    this.writeScalar(this.frameUniformData, 37, deltaTime);
+    this.writeScalar(this.frameUniformData, 38, this.config.worldRadius);
+    this.writeScalar(this.frameUniformData, 39, this.config.seaLevel);
+    this.writeScalar(this.frameUniformData, 40, this.config.atmosphereHeight);
+    this.writeScalar(this.frameUniformData, 41, this.config.flyHeight);
+    this.writeScalar(this.frameUniformData, 42, 0);
+    this.writeScalar(this.frameUniformData, 43, 0);
     this.device.queue.writeBuffer(this.frameUniformBuffer, 0, this.frameUniformData);
   }
 

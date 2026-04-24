@@ -8,6 +8,7 @@ import {
   createPlayerState,
   updatePlayerController,
 } from "./player_controller";
+import { TerrainQuery } from "./terrain_query";
 
 export interface MiniEngineBootstrap {
   canvas: HTMLCanvasElement;
@@ -15,6 +16,7 @@ export interface MiniEngineBootstrap {
   device: GPUDevice;
   presentationFormat: GPUTextureFormat;
   shaders: ShaderLibrary;
+  baseMapBitmap: ImageBitmap;
   config?: Partial<EngineConfig>;
 }
 
@@ -49,6 +51,7 @@ export class MiniEngine {
   readonly player: PlayerState;
   readonly input: PlayerInputState;
   readonly sunDirection: Vec3;
+  readonly terrainQuery: TerrainQuery;
 
   private isRunning = false;
   private lastTimeMs = 0;
@@ -60,6 +63,7 @@ export class MiniEngine {
     device: GPUDevice,
     config: EngineConfig,
     bridge: GpuBridge,
+    terrainQuery: TerrainQuery,
   ) {
     this.canvas = canvas;
     this.context = context;
@@ -69,8 +73,9 @@ export class MiniEngine {
     this.camera = createCameraState();
     this.player = createPlayerState(config.worldRadius, config.flyHeight);
     this.input = createPlayerInputState();
-    this.sunDirection = vec3(-0.35, 0.88, -0.22);
+    this.sunDirection = vec3(-0.55, 0.45, -0.70);
     vec3Normalize(this.sunDirection, this.sunDirection);
+    this.terrainQuery = terrainQuery;
   }
 
   static async create(bootstrap: MiniEngineBootstrap): Promise<MiniEngine> {
@@ -90,7 +95,10 @@ export class MiniEngine {
       bootstrap.shaders,
       bootstrap.canvas.width,
       bootstrap.canvas.height,
+      bootstrap.baseMapBitmap,
     );
+
+    const terrainQuery = new TerrainQuery(config.terrainNoise, bootstrap.baseMapBitmap);
 
     const engine = new MiniEngine(
       bootstrap.canvas,
@@ -98,6 +106,7 @@ export class MiniEngine {
       bootstrap.device,
       config,
       bridge,
+      terrainQuery,
     );
     engine.resize();
     return engine;
@@ -176,18 +185,17 @@ export class MiniEngine {
       this.player,
       this.input,
       deltaTime,
-      this.config.terrainNoise,
+      this.terrainQuery,
       this.config.seaLevel,
     );
     updateOrbitalCamera(
       this.camera,
-      this.player.position,
-      this.player.forward,
-      this.player.worldCenter,
+      this.player,
       this.canvas.width / this.canvas.height,
+      deltaTime,
     );
 
-    this.bridge.updateFrameUniforms(this.camera, this.sunDirection, timeMs * 0.001, deltaTime);
+    this.bridge.updateFrameUniforms(this.camera, this.sunDirection, this.player.position, timeMs * 0.001, deltaTime);
     this.bridge.updateCloudUniforms(this.player, deltaTime);
     this.bridge.updateAirplaneUniforms(this.player);
     this.bridge.render(this.context.getCurrentTexture().createView(), this.camera);

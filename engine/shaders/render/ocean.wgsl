@@ -8,6 +8,7 @@ struct FrameUniforms {
   sunDir: vec4f,
   cameraRight: vec4f,
   cameraUp: vec4f,
+  playerPos: vec4f,
   time: f32,
   deltaTime: f32,
   worldRadius: f32,
@@ -178,46 +179,30 @@ fn tangentFrame(n: vec3f) -> mat3x3<f32> {
   return mat3x3<f32>(tangent, bitangent, n);
 }
 
-fn gerstnerWave(localPos: vec2f, dir: vec2f, steepness: f32, wavelength: f32, speed: f32, amplitude: f32, time: f32) -> vec3f {
-  let k = 6.28318530718 / wavelength;
-  let c = speed;
-  let d = normalize(dir);
-  let phase = k * dot(d, localPos) + c * time;
-  let cosP = cos(phase);
-  let sinP = sin(phase);
-  let q = steepness / max(k * amplitude * 3.0, 0.001);
-  return vec3f(
-    d.x * (q * amplitude * cosP),
-    amplitude * sinP,
-    d.y * (q * amplitude * cosP)
-  );
+fn atmosphericFog(worldPos: vec3f, cameraPos: vec3f, sunDir: vec3f) -> vec4f {
+  let viewDir = normalize(worldPos - cameraPos);
+  let dist = length(worldPos - cameraPos);
+  let altitude = length(cameraPos) - frame.worldRadius;
+  let altFactor = exp(-altitude / 400.0);
+  let density = 0.00035 * altFactor;
+  let fogAmount = 1.0 - exp(-dist * density);
+  let sunDot = max(dot(viewDir, normalize(sunDir)), 0.0);
+  let skyBase = vec3f(0.45, 0.62, 0.88);
+  let sunsetTint = vec3f(0.98, 0.58, 0.32);
+  let fogCol = mix(skyBase, sunsetTint, pow(sunDot, 4.0) * 0.5);
+  return vec4f(fogCol, fogAmount);
 }
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
   let sphereDir = normalize(terrainPositions[vertexIndex].xyz);
   let terrainHeight = terrainHeights[vertexIndex];
-  let uv = sphereToUV(sphereDir);
-  let basis = tangentFrame(sphereDir);
-  let localPos = vec2f(
-    (uv.x - 0.5) * 6.28318530718 * terrain.worldRadius,
-    (uv.y - 0.5) * 3.14159265359 * terrain.worldRadius
-  );
-  let shorelineDamp = 1.0 - smoothstep(frame.seaLevel - 1.0, frame.seaLevel + 10.0, terrainHeight);
-  let swellA = gerstnerWave(localPos, vec2f(0.92, 0.38), 0.85, 280.0, 0.65, 9.0, frame.time);
-  let swellB = gerstnerWave(localPos, vec2f(-0.44, 0.9), 0.72, 170.0, 0.92, 5.5, frame.time * 1.17);
-  let chop = gerstnerWave(localPos, vec2f(0.21, -0.97), 0.58, 85.0, 1.45, 2.2, frame.time * 1.35);
-  let wave = (swellA + swellB + chop) * shorelineDamp;
-  let basePos = sphereDir * (terrain.worldRadius + frame.seaLevel);
-  let worldPos = basePos
-    + basis[0] * wave.x
-    + basis[1] * wave.z
-    + sphereDir * wave.y;
+  let worldPos = sphereDir * (terrain.worldRadius + frame.seaLevel);
 
   var out: VertexOut;
   out.worldPos = worldPos;
   out.sphereDir = sphereDir;
-  out.uv = uv;
+  out.uv = sphereToUV(sphereDir);
   out.terrainHeight = terrainHeight;
   out.clipPosition = frame.viewProjection * vec4f(worldPos, 1.0);
   return out;
@@ -234,16 +219,30 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 
   let dirToSun = normalize(frame.sunDir.xyz);
   let viewDir = normalize(frame.cameraPos.xyz - in.worldPos);
-  let dx = dpdx(in.worldPos);
-  let dy = dpdy(in.worldPos);
-  var normal = normalize(cross(dx, dy));
-  if (dot(normal, in.sphereDir) < 0.0) {
-    normal = -normal;
-  }
+  let basis = tangentFrame(in.sphereDir);
+  let n1 = vec2f(
+    snoise(in.worldPos * 0.015 + vec3f(frame.time * 0.3, 0.0, 0.0)),
+    snoise(in.worldPos.zxy * 0.015 + vec3f(0.0, frame.time * 0.25, 0.0))
+  );
+  let n2 = vec2f(
+    snoise(in.worldPos * 0.18 + vec3f(frame.time * 1.1, 0.0, 0.0)),
+    snoise(in.worldPos.zxy * 0.18 + vec3f(0.0, frame.time * 0.95, 0.0))
+  );
+  let bump = n1 * 0.6 + n2 * 0.25;
+  let normal = normalize(basis * normalize(vec3f(bump * 0.25, 1.0)));
 
   let fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.5);
+  let reflDir = reflect(-viewDir, normal);
+  let skyUp = max(dot(reflDir, in.sphereDir), 0.0);
+  let skyRefl = mix(
+    vec3f(0.35, 0.52, 0.78),
+    vec3f(0.08, 0.22, 0.52),
+    pow(skyUp, 0.6)
+  );
   let halfVector = normalize(dirToSun + viewDir);
-  let specularHighlight = pow(max(dot(normal, halfVector), 0.0), 96.0) * (0.3 + fresnel * 0.7);
+  let specBase = pow(max(dot(normal, halfVector), 0.0), 24.0);
+  let glitterNoise = snoise(in.worldPos * 2.5 + vec3f(frame.time * 3.0, 0.0, 0.0));
+  let glitter = pow(max(glitterNoise, 0.0), 6.0) * specBase * 4.0;
 
   let diffuse = max(dot(normal, dirToSun), 0.0);
   let deepWaterColor = vec3f(0.03, 0.11, 0.22);
@@ -252,15 +251,18 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let caustic = sin(in.worldPos.x * 0.3 + frame.time) * sin(in.worldPos.z * 0.3 + frame.time * 1.3);
   let shallowTinted = shallowWaterColor + vec3f(0.15, 0.18, 0.12) * max(caustic, 0.0) * (1.0 - depthFactor);
   let waterBase = mix(shallowTinted, deepWaterColor, depthFactor);
-  let waterCol = waterBase * (0.45 + diffuse * 0.4 + fresnel * 0.25);
-  let highlight = vec3f(1.0, 0.95, 0.82) * specularHighlight;
+  let waterLit = waterBase * (0.35 + diffuse * 0.5);
+  let waterCol = mix(waterLit, skyRefl, fresnel * 0.85);
+  let highlight = vec3f(1.0, 0.97, 0.86) * (specBase * 0.6 + glitter);
   let foam = step(waterDepth, 1.2 + sin(frame.time * 2.0 - in.uv.x * 50.0) * 0.5);
   let shoreFoam = (1.0 - smoothstep(0.0, 4.0, waterDepth)) * 0.8;
   let foamColor = vec3f(1.0) * max(foam, shoreFoam);
-  let albedoLighting = waterCol + highlight + foamColor;
-  let dist = length(frame.cameraPos.xyz - in.worldPos);
-  let fogFactor = 1.0 - exp(-dist * 0.0015);
-  let finalColor = mix(albedoLighting, vec3f(0.22, 0.42, 0.86), fogFactor);
+  let planeOnSea = normalize(frame.playerPos.xyz) * (terrain.worldRadius + frame.seaLevel);
+  let shadowDist = length(in.worldPos - planeOnSea);
+  let planeShadow = 1.0 - (1.0 - smoothstep(0.0, 40.0, shadowDist)) * 0.4;
+  let albedoLighting = (waterCol + highlight + foamColor) * planeShadow;
+  let fog = atmosphericFog(in.worldPos, frame.cameraPos.xyz, frame.sunDir.xyz);
+  let finalColor = mix(albedoLighting, fog.rgb, fog.a);
 
   return vec4f(finalColor, mix(0.42, 0.72, depthFactor));
 }

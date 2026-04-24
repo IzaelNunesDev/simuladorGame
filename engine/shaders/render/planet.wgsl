@@ -8,6 +8,7 @@ struct FrameUniforms {
   sunDir: vec4f,
   cameraRight: vec4f,
   cameraUp: vec4f,
+  playerPos: vec4f,
   time: f32,
   deltaTime: f32,
   worldRadius: f32,
@@ -146,6 +147,20 @@ fn tangentFrame(n: vec3f) -> mat3x3<f32> {
   return mat3x3<f32>(tangent, bitangent, n);
 }
 
+fn atmosphericFog(worldPos: vec3f, cameraPos: vec3f, sunDir: vec3f) -> vec4f {
+  let viewDir = normalize(worldPos - cameraPos);
+  let dist = length(worldPos - cameraPos);
+  let altitude = length(cameraPos) - frame.worldRadius;
+  let altFactor = exp(-altitude / 400.0);
+  let density = 0.00035 * altFactor;
+  let fogAmount = 1.0 - exp(-dist * density);
+  let sunDot = max(dot(viewDir, normalize(sunDir)), 0.0);
+  let skyBase = vec3f(0.45, 0.62, 0.88);
+  let sunsetTint = vec3f(0.98, 0.58, 0.32);
+  let fogCol = mix(skyBase, sunsetTint, pow(sunDot, 4.0) * 0.5);
+  return vec4f(fogCol, fogAmount);
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
   let worldPos = terrainPositions[vertexIndex].xyz;
@@ -168,7 +183,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let viewDir = normalize(frame.cameraPos.xyz - in.worldPos);
   let planetPos = in.sphereDir;
   let planetSeed = terrain.seed;
-  let humidityNoise = fractalNoise(
+  let humidityLarge = fractalNoise(
     planetPos.yzx * 1.37 + vec3f(planetSeed * 0.13, planetSeed * 0.29, planetSeed * 0.17),
     terrain.baseFreq * 0.72,
     max(terrain.octaves, 3u),
@@ -176,6 +191,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     terrain.lacunarity * 0.92,
     vec3f(37.1, 11.7, 53.9)
   ) * 0.5 + 0.5;
+  let humiditySmall = snoise(planetPos * 8.5 + vec3f(planetSeed * 2.1, 7.3, -3.1)) * 0.25;
+  let humidityNoise = clamp(humidityLarge + humiditySmall, 0.0, 1.0);
   let heightBlend = clamp(in.height / max(terrain.baseAmp * 0.95, 0.001), 0.0, 1.0);
   let slope = 1.0 - max(dot(baseNormal, in.sphereDir), 0.0);
   let latitude = abs(in.uv.y * 2.0 - 1.0);
@@ -222,15 +239,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let normal = normalize(frameBasis * normalize(vec3f(bumpVec.xy * bumpStrength, bumpVec.z)));
   let diffuse = max(dot(normal, dirToSun), 0.0);
 
-  let skyColor = vec3f(0.42, 0.58, 0.86);
-  let groundColor = vec3f(0.18, 0.12, 0.08);
-  let hemiFactor = normal.y * 0.5 + 0.5;
-  let hemisphereLight = mix(groundColor, skyColor, hemiFactor);
+  let surfaceUp = in.sphereDir;
+  let skyColor = vec3f(0.55, 0.70, 0.95);
+  let groundColor = vec3f(0.25, 0.20, 0.15);
+  let hemiFactor = dot(normal, surfaceUp) * 0.5 + 0.5;
+  let ambientIndirect = mix(groundColor, skyColor, hemiFactor) * 0.35;
   let rimLight = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0) * 0.08;
   let backLight = pow(max(dot(-dirToSun, viewDir), 0.0), 3.0) * slope * 0.12;
-  let albedoLighting = albedo * hemisphereLight * 0.9 + albedo * diffuse * 0.88 + vec3f(rimLight + backLight);
-  let dist = length(frame.cameraPos.xyz - in.worldPos);
-  let fogFactor = 1.0 - exp(-dist * 0.0015);
-  let finalColor = mix(albedoLighting, vec3f(0.22, 0.42, 0.86), fogFactor);
+  let sunLight = albedo * diffuse * 1.15;
+  let albedoLighting = albedo * ambientIndirect + sunLight + vec3f(rimLight + backLight);
+  let fog = atmosphericFog(in.worldPos, frame.cameraPos.xyz, frame.sunDir.xyz);
+  let finalColor = mix(albedoLighting, fog.rgb, fog.a);
   return vec4f(finalColor, 1.0);
 }

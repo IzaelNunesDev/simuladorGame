@@ -8,6 +8,7 @@ struct FrameUniforms {
   sunDir: vec4f,
   cameraRight: vec4f,
   cameraUp: vec4f,
+  playerPos: vec4f,
   time: f32,
   deltaTime: f32,
   worldRadius: f32,

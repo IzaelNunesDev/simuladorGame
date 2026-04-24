@@ -21,7 +21,7 @@ function dot4(ax: number, ay: number, az: number, aw: number, bx: number, by: nu
   return ax * bx + ay * by + az * bz + aw * bw;
 }
 
-function snoise3(x: number, y: number, z: number): number {
+export function snoise3(x: number, y: number, z: number): number {
   const cX = 1.0 / 6.0;
   const cY = 1.0 / 3.0;
 
@@ -172,7 +172,7 @@ function snoise3(x: number, y: number, z: number): number {
   );
 }
 
-function fractalNoise3(
+export function fractalNoise3(
   x: number,
   y: number,
   z: number,
@@ -196,7 +196,7 @@ function fractalNoise3(
   return noise / Math.max(amplitudeSum, 0.0001);
 }
 
-function ridgedNoise3(x: number, y: number, z: number, config: TerrainNoiseSettings): number {
+export function ridgedNoise3(x: number, y: number, z: number, config: TerrainNoiseSettings): number {
   let value = 0.0;
   let amplitude = 1.0;
   let frequency = config.baseFrequency * 1.35;
