@@ -1,6 +1,7 @@
 import type { CameraState } from "./camera";
 import { Vec3 } from "./math";
 import type { PlayerState } from "./player_controller";
+import { MeshData } from "./gltf_loader";
 
 export interface TerrainNoiseSettings {
   octaves: number;
@@ -37,8 +38,7 @@ export interface ShaderLibrary {
 
 const FRAME_UNIFORM_FLOATS = 44;
 const CLOUD_UNIFORM_FLOATS = 20;
-const AIRPLANE_UNIFORM_FLOATS = 20;
-const AIRPLANE_VERTEX_COUNT = 51;
+const AIRPLANE_UNIFORM_FLOATS = 24;
 const PARTICLE_STRIDE_FLOATS = 16;
 const TERRAIN_PARAM_BYTES = 32;
 
@@ -51,6 +51,7 @@ export class GpuBridge {
   readonly terrainIndexCount: number;
   readonly cloudParticleCount: number;
   readonly terrainFaceIndexCount: number;
+  readonly airplaneVertexCount: number;
 
   private readonly frameUniformData = new Float32Array(FRAME_UNIFORM_FLOATS);
   private readonly cloudUniformData = new Float32Array(CLOUD_UNIFORM_FLOATS);
@@ -66,6 +67,9 @@ export class GpuBridge {
   private readonly terrainHeightBuffer: GPUBuffer;
   private readonly particleBuffer: GPUBuffer;
   private readonly terrainIndexBuffer: GPUBuffer;
+  private readonly airplanePositionBuffer: GPUBuffer;
+  private readonly airplaneNormalBuffer: GPUBuffer;
+  private readonly airplaneNodeIndexBuffer: GPUBuffer;
 
   private readonly terrainComputePipeline: GPUComputePipeline;
   private readonly cloudsComputePipeline: GPUComputePipeline;
@@ -138,6 +142,10 @@ export class GpuBridge {
     atmosphereRenderPipeline: GPURenderPipeline,
     cloudsRenderPipeline: GPURenderPipeline,
     airplaneRenderPipeline: GPURenderPipeline,
+    airplanePositionBuffer: GPUBuffer,
+    airplaneNormalBuffer: GPUBuffer,
+    airplaneNodeIndexBuffer: GPUBuffer,
+    airplaneVertexCount: number,
     atmosphereFrameBindGroup: GPUBindGroup,
     planetFrameBindGroup: GPUBindGroup,
     oceanFrameBindGroup: GPUBindGroup,
@@ -174,6 +182,10 @@ export class GpuBridge {
     this.atmosphereRenderPipeline = atmosphereRenderPipeline;
     this.cloudsRenderPipeline = cloudsRenderPipeline;
     this.airplaneRenderPipeline = airplaneRenderPipeline;
+    this.airplanePositionBuffer = airplanePositionBuffer;
+    this.airplaneNormalBuffer = airplaneNormalBuffer;
+    this.airplaneNodeIndexBuffer = airplaneNodeIndexBuffer;
+    this.airplaneVertexCount = airplaneVertexCount;
     this.atmosphereFrameBindGroup = atmosphereFrameBindGroup;
     this.planetFrameBindGroup = planetFrameBindGroup;
     this.oceanFrameBindGroup = oceanFrameBindGroup;
@@ -196,6 +208,7 @@ export class GpuBridge {
     canvasWidth: number,
     canvasHeight: number,
     baseMapBitmap: ImageBitmap,
+    airplaneMesh: MeshData,
   ): Promise<GpuBridge> {
     const terrainVertexCount = config.terrainResolution * config.terrainResolution * 6;
     const terrainIndexData = buildTerrainIndexBuffer(config.terrainResolution);
@@ -286,7 +299,31 @@ export class GpuBridge {
     const oceanRenderPipeline = createRenderPipeline(device, format, shaders.oceanRender, "vs_main", "fs_main", true);
     const atmosphereRenderPipeline = createRenderPipeline(device, format, shaders.atmosphereRender, "vs_main", "fs_main", true);
     const cloudsRenderPipeline = createRenderPipeline(device, format, shaders.cloudsRender, "vs_main", "fs_main", true);
-    const airplaneRenderPipeline = createRenderPipeline(device, format, shaders.airplaneRender, "vs_main", "fs_main");
+    const airplaneRenderPipeline = createRenderPipeline(device, format, shaders.airplaneRender, "vs_main", "fs_main", false, true);
+
+    const airplanePositionBuffer = device.createBuffer({
+      size: airplaneMesh.positions.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: true,
+    });
+    new Float32Array(airplanePositionBuffer.getMappedRange()).set(airplaneMesh.positions);
+    airplanePositionBuffer.unmap();
+
+    const airplaneNormalBuffer = device.createBuffer({
+      size: airplaneMesh.normals.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: true,
+    });
+    new Float32Array(airplaneNormalBuffer.getMappedRange()).set(airplaneMesh.normals);
+    airplaneNormalBuffer.unmap();
+
+    const airplaneNodeIndexBuffer = device.createBuffer({
+      size: airplaneMesh.nodeIndices.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: true,
+    });
+    new Float32Array(airplaneNodeIndexBuffer.getMappedRange()).set(airplaneMesh.nodeIndices);
+    airplaneNodeIndexBuffer.unmap();
 
     const atmosphereFrameBindGroup = device.createBindGroup({
       layout: atmosphereRenderPipeline.getBindGroupLayout(0),
@@ -393,6 +430,10 @@ export class GpuBridge {
       atmosphereRenderPipeline,
       cloudsRenderPipeline,
       airplaneRenderPipeline,
+      airplanePositionBuffer,
+      airplaneNormalBuffer,
+      airplaneNodeIndexBuffer,
+      airplaneMesh.vertexCount,
       atmosphereFrameBindGroup,
       planetFrameBindGroup,
       oceanFrameBindGroup,
@@ -462,27 +503,41 @@ export class GpuBridge {
     this.device.queue.writeBuffer(this.cloudParamBuffer, 0, this.cloudUniformData);
   }
 
-  updateAirplaneUniforms(player: PlayerState): void {
-    const scale = Math.max(this.config.flyHeight * 0.012, 1.35);
-    const offsetForward = scale * 5.5;
-    const offsetDown = scale * 0.65;
-    const planePosX = player.position[0] + player.forward[0] * offsetForward - player.up[0] * offsetDown;
-    const planePosY = player.position[1] + player.forward[1] * offsetForward - player.up[1] * offsetDown;
-    const planePosZ = player.position[2] + player.forward[2] * offsetForward - player.up[2] * offsetDown;
+  updateAirplaneUniforms(player: PlayerState, input: PlayerInputState): void {
+    const scale = 0.8; // Reduced scale
+    const offsetDown = 1.5; // Offset to bring the body into view
+    
+    // Reverse orientation (flip forward and right)
+    const forwardX = -player.forward[0] * scale;
+    const forwardY = -player.forward[1] * scale;
+    const forwardZ = -player.forward[2] * scale;
+    
+    const rightX = -player.right[0] * scale;
+    const rightY = -player.right[1] * scale;
+    const rightZ = -player.right[2] * scale;
+    
+    const upX = player.up[0] * scale;
+    const upY = player.up[1] * scale;
+    const upZ = player.up[2] * scale;
 
-    this.airplaneUniformData[0] = player.right[0] * scale;
-    this.airplaneUniformData[1] = player.right[1] * scale;
-    this.airplaneUniformData[2] = player.right[2] * scale;
+    // Apply offset down along the "up" vector
+    const planePosX = player.position[0] - player.up[0] * offsetDown;
+    const planePosY = player.position[1] - player.up[1] * offsetDown;
+    const planePosZ = player.position[2] - player.up[2] * offsetDown;
+
+    this.airplaneUniformData[0] = rightX;
+    this.airplaneUniformData[1] = rightY;
+    this.airplaneUniformData[2] = rightZ;
     this.airplaneUniformData[3] = 0;
 
-    this.airplaneUniformData[4] = player.up[0] * scale;
-    this.airplaneUniformData[5] = player.up[1] * scale;
-    this.airplaneUniformData[6] = player.up[2] * scale;
+    this.airplaneUniformData[4] = upX;
+    this.airplaneUniformData[5] = upY;
+    this.airplaneUniformData[6] = upZ;
     this.airplaneUniformData[7] = 0;
 
-    this.airplaneUniformData[8] = player.forward[0] * scale;
-    this.airplaneUniformData[9] = player.forward[1] * scale;
-    this.airplaneUniformData[10] = player.forward[2] * scale;
+    this.airplaneUniformData[8] = forwardX;
+    this.airplaneUniformData[9] = forwardY;
+    this.airplaneUniformData[10] = forwardZ;
     this.airplaneUniformData[11] = 0;
 
     this.airplaneUniformData[12] = planePosX;
@@ -490,10 +545,16 @@ export class GpuBridge {
     this.airplaneUniformData[14] = planePosZ;
     this.airplaneUniformData[15] = 1;
 
-    this.airplaneUniformData[16] = 0.92;
-    this.airplaneUniformData[17] = 0.74;
-    this.airplaneUniformData[18] = 0.18;
+    this.airplaneUniformData[16] = 0.9; // Silver/White base
+    this.airplaneUniformData[17] = 0.92;
+    this.airplaneUniformData[18] = 0.98;
     this.airplaneUniformData[19] = 1;
+
+    // Animation parameters
+    this.airplaneUniformData[20] = input.pitch;
+    this.airplaneUniformData[21] = input.roll;
+    this.airplaneUniformData[22] = input.yaw;
+    this.airplaneUniformData[23] = player.speed;
     this.device.queue.writeBuffer(this.airplaneUniformBuffer, 0, this.airplaneUniformData);
   }
 
@@ -543,7 +604,10 @@ export class GpuBridge {
     pass.setPipeline(this.airplaneRenderPipeline);
     pass.setBindGroup(0, this.airplaneFrameBindGroup);
     pass.setBindGroup(1, this.airplaneUniformBindGroup);
-    pass.draw(AIRPLANE_VERTEX_COUNT, 1, 0, 0);
+    pass.setVertexBuffer(0, this.airplanePositionBuffer);
+    pass.setVertexBuffer(1, this.airplaneNormalBuffer);
+    pass.setVertexBuffer(2, this.airplaneNodeIndexBuffer);
+    pass.draw(this.airplaneVertexCount, 1, 0, 0);
 
     pass.setPipeline(this.cloudsRenderPipeline);
     pass.setBindGroup(0, this.cloudsFrameBindGroup);
@@ -601,13 +665,32 @@ function createRenderPipeline(
   vertexEntryPoint: string,
   fragmentEntryPoint: string,
   enableBlend = false,
+  isAirplane = false,
 ): GPURenderPipeline {
   const module = device.createShaderModule({ code: shaderCode });
+
+  const vertexBuffers: GPUVertexBufferLayout[] = [];
+  if (isAirplane) {
+    vertexBuffers.push({
+      arrayStride: 12,
+      attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
+    });
+    vertexBuffers.push({
+      arrayStride: 12,
+      attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
+    });
+    vertexBuffers.push({
+      arrayStride: 4,
+      attributes: [{ shaderLocation: 2, offset: 0, format: "float32" }],
+    });
+  }
+
   return device.createRenderPipeline({
     layout: "auto",
     vertex: {
       module,
       entryPoint: vertexEntryPoint,
+      buffers: vertexBuffers.length > 0 ? vertexBuffers : undefined,
     },
     fragment: {
       module,
@@ -617,17 +700,17 @@ function createRenderPipeline(
           format,
           blend: enableBlend
             ? {
-                color: {
-                  srcFactor: "src-alpha",
-                  dstFactor: "one-minus-src-alpha",
-                  operation: "add",
-                },
-                alpha: {
-                  srcFactor: "one",
-                  dstFactor: "one-minus-src-alpha",
-                  operation: "add",
-                },
-              }
+              color: {
+                srcFactor: "src-alpha",
+                dstFactor: "one-minus-src-alpha",
+                operation: "add",
+              },
+              alpha: {
+                srcFactor: "one",
+                dstFactor: "one-minus-src-alpha",
+                operation: "add",
+              },
+            }
             : undefined,
         },
       ],

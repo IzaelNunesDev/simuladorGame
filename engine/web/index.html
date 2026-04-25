@@ -73,6 +73,28 @@
         line-height: 1.45;
       }
 
+      #hud-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .hud-button {
+        appearance: none;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        padding: 8px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .hud-button:hover {
+        border-color: rgba(139, 225, 255, 0.4);
+        background: rgba(139, 225, 255, 0.1);
+      }
+
       #error {
         color: #ffb7b7;
       }
@@ -91,14 +113,19 @@
       <canvas id="viewport"></canvas>
       <aside id="hud">
         <h1>Mini-Engine WebGPU</h1>
-        <p>Controle orbital com gravidade esferica, terreno procedural e nuvens simuladas na GPU.</p>
+        <p>Simulacao de voo com gravidade esferica e modelo 3D de alta fidelidade.</p>
         <p>
           Voar: <kbd>W</kbd>/<kbd>S</kbd> ou <kbd>I</kbd>/<kbd>K</kbd>
           | Guinar: <kbd>J</kbd>/<kbd>L</kbd>
           | Bank: <kbd>Q</kbd>/<kbd>E</kbd>
-          | Potencia: <kbd>Shift</kbd>
+          <br/>
+          Potencia: <kbd>Shift</kbd>
           | Freio: <kbd>Ctrl</kbd>
+          | <b>Turbo: <kbd>Space</kbd></b>
         </p>
+        <div id="hud-actions">
+          <button id="export-ai-context" class="hud-button" type="button">Export AI Context JSON</button>
+        </div>
         <p id="error"></p>
       </aside>
     </div>

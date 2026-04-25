@@ -1,4 +1,5 @@
 import { createMiniEngine } from "../wasm/main";
+import { ModelManager } from "../wasm/model_manager";
 
 // Importando os shaders diretamente pelo Vite
 import terrainComputeRaw from "../shaders/compute/terrain_gen.wgsl?raw";
@@ -16,6 +17,16 @@ async function loadImageBitmapFromUrl(url: string): Promise<ImageBitmap> {
   }
   const blob = await response.blob();
   return await createImageBitmap(blob);
+}
+
+function downloadJsonFile(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 async function bootstrap(): Promise<void> {
@@ -58,13 +69,36 @@ async function bootstrap(): Promise<void> {
 
   const baseMapBitmap = await loadImageBitmapFromUrl('/base_map.png');
 
+  const gltfResponse = await fetch('/planer/Export.gltf');
+  if (!gltfResponse.ok) {
+    throw new Error(`Falha ao carregar modelo do aviao: ${gltfResponse.status}`);
+  }
+  const gltfJson = await gltfResponse.json();
+  const modelManager = await ModelManager.create("/public/planer/Export.gltf", gltfJson);
+  const airplaneMesh = await modelManager.buildMesh();
+  const aiContext = modelManager.exportAiContext();
+
+  console.info("Manifesto semantico do modelo carregado.", modelManager.manifest);
+  console.info("Contexto GLTF para IA carregado.", aiContext);
+  Object.assign(window, {
+    __airplaneSemanticManager: modelManager,
+    __airplaneSemanticManifest: modelManager.manifest,
+    __airplaneGltfAiContext: aiContext,
+  });
+
+  const exportButton = document.querySelector<HTMLButtonElement>("#export-ai-context");
+  exportButton?.addEventListener("click", () => {
+    downloadJsonFile("airplane_gltf_ai_context.json", modelManager.exportAiContext());
+  });
+
   const engine = await createMiniEngine({
     canvas,
     context,
     device,
-    presentationFormat,
+     presentationFormat,
     shaders,
     baseMapBitmap,
+    airplaneMesh,
   });
 
   const onResize = (): void => engine.resize();

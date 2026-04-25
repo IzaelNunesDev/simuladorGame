@@ -96,7 +96,7 @@ export function updateOrbitalCamera(
   vec3AddScaled(camera.forward, camera.forward, camera._scratchVec, damping);
   vec3Normalize(camera.forward, camera.forward);
 
-  vec3Cross(camera.right, camera.forward, camera.up);
+  vec3Cross(camera.right, camera.up, camera.forward);
   vec3Normalize(camera.right, camera.right);
 
   // Target look e position ideais

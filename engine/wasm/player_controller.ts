@@ -24,6 +24,7 @@ export interface PlayerInputState {
   roll: number;
   throttle: number;
   brake: number;
+  turbo: number;
 }
 
 export interface PlayerState {
@@ -43,6 +44,7 @@ export interface PlayerState {
   minSpeed: number;
   maxSpeed: number;
   acceleration: number;
+  turboBoost: number;
   yawRate: number;
   pitchRate: number;
   rollBank: number;
@@ -59,6 +61,7 @@ export function createPlayerInputState(): PlayerInputState {
     roll: 0,
     throttle: 0,
     brake: 0,
+    turbo: 0,
   };
 }
 
@@ -87,6 +90,7 @@ export function createPlayerState(worldRadius: number, initialAltitude: number):
     minSpeed: 12,
     maxSpeed: 160,
     acceleration: 28,
+    turboBoost: 2.2,
     yawRate: 0.9,
     pitchRate: 0.7,
     rollBank: 0,
@@ -96,6 +100,8 @@ export function createPlayerState(worldRadius: number, initialAltitude: number):
     _rotationQuat: quat(),
   };
 }
+
+
 
 export function updatePlayerController(
   player: PlayerState,
@@ -107,10 +113,13 @@ export function updatePlayerController(
   const response = clamp(player.bankResponse * deltaTime, 0, 1);
   
   // Aceleração
+  const targetAcceleration = (input.throttle - input.brake + input.turbo * player.turboBoost) * player.acceleration;
+  const targetMaxSpeed = player.maxSpeed * (1.0 + input.turbo * 0.5);
+  
   player.speed = clamp(
-    player.speed + (input.throttle - input.brake) * player.acceleration * deltaTime,
+    player.speed + targetAcceleration * deltaTime,
     player.minSpeed,
-    player.maxSpeed,
+    targetMaxSpeed,
   );
 
   vec3Copy(player.previousPosition, player.position);
@@ -170,7 +179,7 @@ export function updatePlayerController(
   vec3ProjectOnPlane(player.forward, player.forward, player.gravityUp);
   vec3Normalize(player.forward, player.forward);
 
-  vec3Cross(player.right, player.forward, player.gravityUp);
+  vec3Cross(player.right, player.gravityUp, player.forward);
   vec3Normalize(player.right, player.right);
 
   vec3Copy(player.up, player.gravityUp);

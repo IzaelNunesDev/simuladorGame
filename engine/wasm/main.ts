@@ -1,5 +1,6 @@
 import { CameraState, createCameraState, updateOrbitalCamera } from "./camera";
 import { EngineConfig, GpuBridge, ShaderLibrary } from "./gpu_bridge";
+import { MeshData } from "./gltf_loader";
 import { Vec3, vec3, vec3Normalize } from "./math";
 import {
   PlayerInputState,
@@ -17,6 +18,7 @@ export interface MiniEngineBootstrap {
   presentationFormat: GPUTextureFormat;
   shaders: ShaderLibrary;
   baseMapBitmap: ImageBitmap;
+  airplaneMesh: MeshData;
   config?: Partial<EngineConfig>;
 }
 
@@ -96,6 +98,7 @@ export class MiniEngine {
       bootstrap.canvas.width,
       bootstrap.canvas.height,
       bootstrap.baseMapBitmap,
+      bootstrap.airplaneMesh,
     );
 
     const terrainQuery = new TerrainQuery(config.terrainNoise, bootstrap.baseMapBitmap);
@@ -170,6 +173,9 @@ export class MiniEngine {
       case "ControlLeft":
         this.input.brake = value;
         break;
+      case "Space":
+        this.input.turbo = value;
+        break;
     }
   }
 
@@ -197,7 +203,7 @@ export class MiniEngine {
 
     this.bridge.updateFrameUniforms(this.camera, this.sunDirection, this.player.position, timeMs * 0.001, deltaTime);
     this.bridge.updateCloudUniforms(this.player, deltaTime);
-    this.bridge.updateAirplaneUniforms(this.player);
+    this.bridge.updateAirplaneUniforms(this.player, this.input);
     this.bridge.render(this.context.getCurrentTexture().createView(), this.camera);
 
     requestAnimationFrame(this.animationFrame);
