@@ -1,5 +1,10 @@
 import { createMiniEngine } from "../wasm/main";
 import { ModelManager } from "../wasm/model_manager";
+import { NetworkClient } from "./network_client";
+import {
+  DEFAULT_MULTIPLAYER_PORT,
+  SNAPSHOT_SEND_INTERVAL_MS,
+} from "../shared/multiplayer";
 
 // Importando os shaders diretamente pelo Vite
 import terrainComputeRaw from "../shaders/compute/terrain_gen.wgsl?raw";
@@ -9,6 +14,7 @@ import oceanRenderRaw from "../shaders/render/ocean.wgsl?raw";
 import atmosphereRenderRaw from "../shaders/render/atmosphere.wgsl?raw";
 import cloudsRenderRaw from "../shaders/render/clouds.wgsl?raw";
 import airplaneRenderRaw from "../shaders/render/airplane.wgsl?raw";
+import projectileRenderRaw from "../shaders/render/projectile.wgsl?raw";
 
 async function loadImageBitmapFromUrl(url: string): Promise<ImageBitmap> {
   const response = await fetch(url);
@@ -65,6 +71,7 @@ async function bootstrap(): Promise<void> {
     atmosphereRender: atmosphereRenderRaw,
     cloudsRender: cloudsRenderRaw,
     airplaneRender: airplaneRenderRaw,
+    projectileRender: projectileRenderRaw,
   };
 
   const baseMapBitmap = await loadImageBitmapFromUrl('/base_map.png');
@@ -74,7 +81,7 @@ async function bootstrap(): Promise<void> {
     throw new Error(`Falha ao carregar modelo do aviao: ${gltfResponse.status}`);
   }
   const gltfJson = await gltfResponse.json();
-  const modelManager = await ModelManager.create("/public/planer/Export.gltf", gltfJson);
+  const modelManager = await ModelManager.create("/planer/Export.gltf", gltfJson);
   const airplaneMesh = await modelManager.buildMesh();
   const aiContext = modelManager.exportAiContext();
 
@@ -106,7 +113,36 @@ async function bootstrap(): Promise<void> {
   window.addEventListener("keydown", (event) => engine.setKeyState(event.code, true));
   window.addEventListener("keyup", (event) => engine.setKeyState(event.code, false));
 
+  const networkStatus = document.querySelector<HTMLElement>("#network-status");
+  const networkClient = new NetworkClient({
+    url: resolveMultiplayerUrl(),
+    onWelcome: (id) => engine.setLocalNetworkId(id),
+    onSnapshot: (players) => engine.syncRemotePlayers(players),
+    onPlayerLeft: (id) => engine.removeRemotePlayer(id),
+    onStatusChange: (status) => {
+      if (networkStatus) {
+        networkStatus.textContent = status;
+      }
+    },
+  });
+  networkClient.connect();
+
+  window.setInterval(() => {
+    networkClient.sendPlayerSnapshot(engine.getLocalPlayerSnapshot(), performance.now());
+  }, SNAPSHOT_SEND_INTERVAL_MS);
+
   engine.start();
+}
+
+function resolveMultiplayerUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  const explicitServer = params.get("server");
+  if (explicitServer) {
+    return explicitServer;
+  }
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.hostname}:${DEFAULT_MULTIPLAYER_PORT}`;
 }
 
 bootstrap().catch((error) => {

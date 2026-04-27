@@ -217,6 +217,35 @@ export function ridgedNoise3(x: number, y: number, z: number, config: TerrainNoi
   return value / Math.max(amplitudeSum, 0.0001);
 }
 
+export function calculateWaveHeight(pos: Vec3, time: number, config: TerrainNoiseSettings): number {
+  const seed = config.seed;
+  const x = pos[0];
+  const y = pos[1];
+  const z = pos[2];
+
+  // Wind direction derived from seed
+  const windAngle = seed * 0.15;
+  const windDirX = Math.cos(windAngle);
+  const windDirZ = Math.sin(windAngle);
+
+  // Scale position for wave calculations
+  const windProj = x * windDirX + z * windDirZ;
+  const crossProj = x * (-windDirZ) + z * windDirX;
+
+  // Large swells (aligned with wind)
+  const swell1 = Math.sin(windProj * 0.006 + time * 0.35 + seed) * 4.5;
+  const swell2 = Math.sin(windProj * 0.012 - time * 0.5 + seed * 1.2) * 2.5;
+
+  // Medium wind-driven waves (choppier)
+  const chop1 = Math.sin(windProj * 0.04 + crossProj * 0.02 + time * 1.1 + seed * 0.8) * 1.2;
+  const chop2 = Math.sin(windProj * 0.08 - crossProj * 0.05 - time * 1.8 + seed * 2.1) * 0.6;
+
+  // Small scale procedural noise for surface texture
+  const noiseDetail = snoise3(x * 0.08, y * 0.08 + time * 0.4, z * 0.08 + seed) * 0.8;
+
+  return swell1 + swell2 + chop1 + chop2 + noiseDetail;
+}
+
 export function getTerrainHeight(sphereDir: Vec3, config: TerrainNoiseSettings): number {
   const x = sphereDir[0];
   const y = sphereDir[1];

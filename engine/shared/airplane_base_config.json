@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "gltf-ai-context/v1",
+  "summary": {
+    "description": "Base template for airplane semantic context. Use this to define common roles and expectations for different aircraft classes."
+  },
+  "roles": {
+    "main_structure": "The primary fuselage or body of the aircraft. Usually static relative to the player position.",
+    "wing_surface": "Aerodynamic surfaces like main wings or ailerons. May have animations for control surfaces.",
+    "tail_surface": "Horizontal and vertical stabilizers, rudders, and elevators.",
+    "engine_part": "Engines, propellers, or turbine blades. Often have rotational animations.",
+    "landing_gear": "Wheels, struts, and bay doors. Often have complex retraction animations.",
+    "cockpit_part": "Internal controls, seats, and instruments.",
+    "weapon_mount": "Hardpoints for guns, missiles, or bombs."
+  },
+  "physics_presets": {
+    "fighter": {
+      "minSpeed": 40,
+      "maxSpeed": 220,
+      "acceleration": 45,
+      "pitchRate": 1.1,
+      "yawRate": 1.2,
+      "bankResponse": 3.5
+    },
+    "cargo": {
+      "minSpeed": 20,
+      "maxSpeed": 120,
+      "acceleration": 15,
+      "pitchRate": 0.4,
+      "yawRate": 0.5,
+      "bankResponse": 1.5
+    },
+    "stunt": {
+      "minSpeed": 10,
+      "maxSpeed": 140,
+      "acceleration": 35,
+      "pitchRate": 1.5,
+      "yawRate": 1.8,
+      "bankResponse": 5.0
+    }
+  }
+}

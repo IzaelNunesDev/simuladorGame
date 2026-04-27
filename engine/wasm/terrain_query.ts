@@ -8,7 +8,7 @@ import type { TerrainNoiseSettings } from "./gpu_bridge";
 import { snoise3, fractalNoise3, ridgedNoise3 } from "./noise";
 
 export class TerrainQuery {
-  private readonly config: TerrainNoiseSettings;
+  public readonly config: TerrainNoiseSettings;
   private readonly mapData: Uint8Array | null = null;
   private readonly mapWidth: number = 0;
   private readonly mapHeight: number = 0;

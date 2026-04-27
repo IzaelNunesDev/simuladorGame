@@ -34,13 +34,27 @@ export interface ShaderLibrary {
   cloudsCompute: string;
   cloudsRender: string;
   airplaneRender: string;
+  projectileRender: string;
 }
 
 const FRAME_UNIFORM_FLOATS = 44;
 const CLOUD_UNIFORM_FLOATS = 20;
-const AIRPLANE_UNIFORM_FLOATS = 24;
+const AIRPLANE_UNIFORM_FLOATS = 28;
 const PARTICLE_STRIDE_FLOATS = 16;
 const TERRAIN_PARAM_BYTES = 32;
+const MAX_AIRPLANES = 8;
+
+export interface AirplaneRenderState {
+  position: Vec3;
+  forward: Vec3;
+  right: Vec3;
+  up: Vec3;
+  speed: number;
+  smoothedPitch: number;
+  smoothedRoll: number;
+  smoothedYaw: number;
+  shootingTimer: number;
+}
 
 export class GpuBridge {
   readonly device: GPUDevice;
@@ -61,11 +75,7 @@ export class GpuBridge {
   private readonly frameUniformBuffer: GPUBuffer;
   private readonly terrainParamBuffer: GPUBuffer;
   private readonly cloudParamBuffer: GPUBuffer;
-  private readonly airplaneUniformBuffer: GPUBuffer;
-  private readonly terrainPositionBuffer: GPUBuffer;
-  private readonly terrainNormalBuffer: GPUBuffer;
-  private readonly terrainHeightBuffer: GPUBuffer;
-  private readonly particleBuffer: GPUBuffer;
+  private readonly airplaneUniformBuffers: GPUBuffer[];
   private readonly terrainIndexBuffer: GPUBuffer;
   private readonly airplanePositionBuffer: GPUBuffer;
   private readonly airplaneNormalBuffer: GPUBuffer;
@@ -78,19 +88,24 @@ export class GpuBridge {
   private readonly atmosphereRenderPipeline: GPURenderPipeline;
   private readonly cloudsRenderPipeline: GPURenderPipeline;
   private readonly airplaneRenderPipeline: GPURenderPipeline;
+  private readonly projectileRenderPipeline: GPURenderPipeline;
 
   private readonly atmosphereFrameBindGroup: GPUBindGroup;
   private readonly planetFrameBindGroup: GPUBindGroup;
   private readonly oceanFrameBindGroup: GPUBindGroup;
   private readonly cloudsFrameBindGroup: GPUBindGroup;
   private readonly airplaneFrameBindGroup: GPUBindGroup;
+  private readonly projectileFrameBindGroup: GPUBindGroup;
   private readonly terrainComputeBindGroup: GPUBindGroup;
   private readonly atmosphereTerrainBindGroup: GPUBindGroup;
   private readonly planetTerrainBindGroup: GPUBindGroup;
   private readonly oceanTerrainBindGroup: GPUBindGroup;
   private readonly cloudComputeBindGroup: GPUBindGroup;
   private readonly cloudRenderBindGroup: GPUBindGroup;
-  private readonly airplaneUniformBindGroup: GPUBindGroup;
+  private readonly airplaneUniformBindGroups: GPUBindGroup[];
+  private readonly projectileBindGroup: GPUBindGroup;
+  private readonly projectileBuffer: GPUBuffer;
+  private readonly projectileData: Float32Array;
 
   private depthTexture: GPUTexture | null = null;
   private depthTextureView: GPUTextureView | null = null;
@@ -129,11 +144,7 @@ export class GpuBridge {
     frameUniformBuffer: GPUBuffer,
     terrainParamBuffer: GPUBuffer,
     cloudParamBuffer: GPUBuffer,
-    airplaneUniformBuffer: GPUBuffer,
-    terrainPositionBuffer: GPUBuffer,
-    terrainNormalBuffer: GPUBuffer,
-    terrainHeightBuffer: GPUBuffer,
-    particleBuffer: GPUBuffer,
+    airplaneUniformBuffers: GPUBuffer[],
     terrainIndexBuffer: GPUBuffer,
     terrainComputePipeline: GPUComputePipeline,
     cloudsComputePipeline: GPUComputePipeline,
@@ -146,18 +157,22 @@ export class GpuBridge {
     airplaneNormalBuffer: GPUBuffer,
     airplaneNodeIndexBuffer: GPUBuffer,
     airplaneVertexCount: number,
+    projectileRenderPipeline: GPURenderPipeline,
+    projectileBuffer: GPUBuffer,
+    projectileBindGroup: GPUBindGroup,
     atmosphereFrameBindGroup: GPUBindGroup,
     planetFrameBindGroup: GPUBindGroup,
     oceanFrameBindGroup: GPUBindGroup,
     cloudsFrameBindGroup: GPUBindGroup,
     airplaneFrameBindGroup: GPUBindGroup,
+    projectileFrameBindGroup: GPUBindGroup,
     terrainComputeBindGroup: GPUBindGroup,
     atmosphereTerrainBindGroup: GPUBindGroup,
     planetTerrainBindGroup: GPUBindGroup,
     oceanTerrainBindGroup: GPUBindGroup,
     cloudComputeBindGroup: GPUBindGroup,
     cloudRenderBindGroup: GPUBindGroup,
-    airplaneUniformBindGroup: GPUBindGroup,
+    airplaneUniformBindGroups: GPUBindGroup[],
   ) {
     this.device = device;
     this.format = format;
@@ -169,11 +184,7 @@ export class GpuBridge {
     this.frameUniformBuffer = frameUniformBuffer;
     this.terrainParamBuffer = terrainParamBuffer;
     this.cloudParamBuffer = cloudParamBuffer;
-    this.airplaneUniformBuffer = airplaneUniformBuffer;
-    this.terrainPositionBuffer = terrainPositionBuffer;
-    this.terrainNormalBuffer = terrainNormalBuffer;
-    this.terrainHeightBuffer = terrainHeightBuffer;
-    this.particleBuffer = particleBuffer;
+    this.airplaneUniformBuffers = airplaneUniformBuffers;
     this.terrainIndexBuffer = terrainIndexBuffer;
     this.terrainComputePipeline = terrainComputePipeline;
     this.cloudsComputePipeline = cloudsComputePipeline;
@@ -186,18 +197,23 @@ export class GpuBridge {
     this.airplaneNormalBuffer = airplaneNormalBuffer;
     this.airplaneNodeIndexBuffer = airplaneNodeIndexBuffer;
     this.airplaneVertexCount = airplaneVertexCount;
+    this.projectileRenderPipeline = projectileRenderPipeline;
+    this.projectileBuffer = projectileBuffer;
+    this.projectileBindGroup = projectileBindGroup;
+    this.projectileData = new Float32Array(100 * 8); // Max 100 projectiles, each 8 floats (pos4, vel4)
     this.atmosphereFrameBindGroup = atmosphereFrameBindGroup;
     this.planetFrameBindGroup = planetFrameBindGroup;
     this.oceanFrameBindGroup = oceanFrameBindGroup;
     this.cloudsFrameBindGroup = cloudsFrameBindGroup;
     this.airplaneFrameBindGroup = airplaneFrameBindGroup;
+    this.projectileFrameBindGroup = projectileFrameBindGroup;
     this.terrainComputeBindGroup = terrainComputeBindGroup;
     this.atmosphereTerrainBindGroup = atmosphereTerrainBindGroup;
     this.planetTerrainBindGroup = planetTerrainBindGroup;
     this.oceanTerrainBindGroup = oceanTerrainBindGroup;
     this.cloudComputeBindGroup = cloudComputeBindGroup;
     this.cloudRenderBindGroup = cloudRenderBindGroup;
-    this.airplaneUniformBindGroup = airplaneUniformBindGroup;
+    this.airplaneUniformBindGroups = airplaneUniformBindGroups;
   }
 
   static async create(
@@ -245,10 +261,10 @@ export class GpuBridge {
       size: CLOUD_UNIFORM_FLOATS * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    const airplaneUniformBuffer = device.createBuffer({
+    const airplaneUniformBuffers = Array.from({ length: MAX_AIRPLANES }, () => device.createBuffer({
       size: AIRPLANE_UNIFORM_FLOATS * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    }));
 
     const terrainPositionBuffer = device.createBuffer({
       size: terrainVertexCount * 16,
@@ -300,6 +316,7 @@ export class GpuBridge {
     const atmosphereRenderPipeline = createRenderPipeline(device, format, shaders.atmosphereRender, "vs_main", "fs_main", true);
     const cloudsRenderPipeline = createRenderPipeline(device, format, shaders.cloudsRender, "vs_main", "fs_main", true);
     const airplaneRenderPipeline = createRenderPipeline(device, format, shaders.airplaneRender, "vs_main", "fs_main", false, true);
+    const projectileRenderPipeline = createRenderPipeline(device, format, shaders.projectileRender, "vs_main", "fs_main", true);
 
     const airplanePositionBuffer = device.createBuffer({
       size: airplaneMesh.positions.byteLength,
@@ -402,9 +419,22 @@ export class GpuBridge {
         { binding: 1, resource: { buffer: particleBuffer } },
       ],
     });
-    const airplaneUniformBindGroup = device.createBindGroup({
+    const airplaneUniformBindGroups = airplaneUniformBuffers.map((buffer) => device.createBindGroup({
       layout: airplaneRenderPipeline.getBindGroupLayout(1),
-      entries: [{ binding: 0, resource: { buffer: airplaneUniformBuffer } }],
+      entries: [{ binding: 0, resource: { buffer } }],
+    }));
+
+    const projectileBuffer = device.createBuffer({
+      size: 100 * 8 * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    const projectileBindGroup = device.createBindGroup({
+      layout: projectileRenderPipeline.getBindGroupLayout(1),
+      entries: [{ binding: 0, resource: { buffer: projectileBuffer } }],
+    });
+    const projectileFrameBindGroup = device.createBindGroup({
+      layout: projectileRenderPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: frameUniformBuffer } }],
     });
 
     const bridge = new GpuBridge(
@@ -417,11 +447,7 @@ export class GpuBridge {
       frameUniformBuffer,
       terrainParamBuffer,
       cloudParamBuffer,
-      airplaneUniformBuffer,
-      terrainPositionBuffer,
-      terrainNormalBuffer,
-      terrainHeightBuffer,
-      particleBuffer,
+      airplaneUniformBuffers,
       terrainIndexBuffer,
       terrainComputePipeline,
       cloudsComputePipeline,
@@ -434,18 +460,22 @@ export class GpuBridge {
       airplaneNormalBuffer,
       airplaneNodeIndexBuffer,
       airplaneMesh.vertexCount,
+      projectileRenderPipeline,
+      projectileBuffer,
+      projectileBindGroup,
       atmosphereFrameBindGroup,
       planetFrameBindGroup,
       oceanFrameBindGroup,
       cloudsFrameBindGroup,
       airplaneFrameBindGroup,
+      projectileFrameBindGroup,
       terrainComputeBindGroup,
       atmosphereTerrainBindGroup,
       planetTerrainBindGroup,
       oceanTerrainBindGroup,
       cloudComputeBindGroup,
       cloudRenderBindGroup,
-      airplaneUniformBindGroup,
+      airplaneUniformBindGroups,
     );
 
     bridge.writeTerrainParams();
@@ -503,7 +533,12 @@ export class GpuBridge {
     this.device.queue.writeBuffer(this.cloudParamBuffer, 0, this.cloudUniformData);
   }
 
-  updateAirplaneUniforms(player: PlayerState, input: PlayerInputState): void {
+  updateAirplaneUniforms(player: AirplaneRenderState, bufferIndex = 0): void {
+    const airplaneUniformBuffer = this.airplaneUniformBuffers[bufferIndex];
+    if (!airplaneUniformBuffer) {
+      return;
+    }
+
     const scale = 0.8; // Reduced scale
     const offsetDown = 1.5; // Offset to bring the body into view
     
@@ -551,16 +586,22 @@ export class GpuBridge {
     this.airplaneUniformData[19] = 1;
 
     // Animation parameters
-    this.airplaneUniformData[20] = input.pitch;
-    this.airplaneUniformData[21] = input.roll;
-    this.airplaneUniformData[22] = input.yaw;
+    this.airplaneUniformData[20] = player.smoothedPitch;
+    this.airplaneUniformData[21] = player.smoothedRoll;
+    this.airplaneUniformData[22] = player.smoothedYaw;
     this.airplaneUniformData[23] = player.speed;
-    this.device.queue.writeBuffer(this.airplaneUniformBuffer, 0, this.airplaneUniformData);
+    this.airplaneUniformData[24] = player.shootingTimer;
+    this.device.queue.writeBuffer(airplaneUniformBuffer, 0, this.airplaneUniformData);
   }
 
-  render(currentTextureView: GPUTextureView, camera: CameraState): void {
+  render(currentTextureView: GPUTextureView, camera: CameraState, airplanes: readonly AirplaneRenderState[], projectiles: {position: Vec3, velocity: Vec3}[] = []): void {
     if (!this.depthTextureView) {
       return;
+    }
+
+    const visibleAirplanes = airplanes.slice(0, this.airplaneUniformBindGroups.length);
+    for (let index = 0; index < visibleAirplanes.length; index += 1) {
+      this.updateAirplaneUniforms(visibleAirplanes[index], index);
     }
 
     const encoder = this.device.createCommandEncoder();
@@ -603,16 +644,39 @@ export class GpuBridge {
 
     pass.setPipeline(this.airplaneRenderPipeline);
     pass.setBindGroup(0, this.airplaneFrameBindGroup);
-    pass.setBindGroup(1, this.airplaneUniformBindGroup);
     pass.setVertexBuffer(0, this.airplanePositionBuffer);
     pass.setVertexBuffer(1, this.airplaneNormalBuffer);
     pass.setVertexBuffer(2, this.airplaneNodeIndexBuffer);
-    pass.draw(this.airplaneVertexCount, 1, 0, 0);
+    for (let index = 0; index < visibleAirplanes.length; index += 1) {
+      pass.setBindGroup(1, this.airplaneUniformBindGroups[index]);
+      pass.draw(this.airplaneVertexCount, 1, 0, 0);
+    }
 
     pass.setPipeline(this.cloudsRenderPipeline);
     pass.setBindGroup(0, this.cloudsFrameBindGroup);
     pass.setBindGroup(1, this.cloudRenderBindGroup);
     pass.draw(6, this.cloudParticleCount, 0, 0);
+
+    if (projectiles.length > 0) {
+      const count = Math.min(projectiles.length, 100);
+      for (let i = 0; i < count; i++) {
+        const p = projectiles[i];
+        this.projectileData[i * 8 + 0] = p.position[0];
+        this.projectileData[i * 8 + 1] = p.position[1];
+        this.projectileData[i * 8 + 2] = p.position[2];
+        this.projectileData[i * 8 + 3] = 1.0;
+        this.projectileData[i * 8 + 4] = p.velocity[0];
+        this.projectileData[i * 8 + 5] = p.velocity[1];
+        this.projectileData[i * 8 + 6] = p.velocity[2];
+        this.projectileData[i * 8 + 7] = 0.0;
+      }
+      this.device.queue.writeBuffer(this.projectileBuffer, 0, this.projectileData.subarray(0, count * 8));
+      
+      pass.setPipeline(this.projectileRenderPipeline);
+      pass.setBindGroup(0, this.projectileFrameBindGroup); // Use the correct bind group for this pipeline
+      pass.setBindGroup(1, this.projectileBindGroup);
+      pass.draw(6, count, 0, 0);
+    }
 
     pass.setPipeline(this.atmosphereRenderPipeline);
     pass.setBindGroup(0, this.atmosphereFrameBindGroup);

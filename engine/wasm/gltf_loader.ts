@@ -7,7 +7,6 @@ import {
   quat,
   vec3,
   vec3TransformMat4,
-  Vec3,
 } from "./math";
 
 export interface MeshData {

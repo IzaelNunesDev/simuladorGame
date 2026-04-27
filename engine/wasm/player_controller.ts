@@ -12,11 +12,9 @@ import {
   vec3ProjectOnPlane,
   vec3RotateByQuat,
   vec3Scale,
-  vec3Length,
-  vec3Dot,
 } from "./math";
-import type { TerrainNoiseSettings } from "./gpu_bridge";
 import type { TerrainQuery } from "./terrain_query";
+import { AirplanePhysicsConfig, AIRPLANE_PRESETS } from "../shared/airplane_presets";
 
 export interface PlayerInputState {
   pitch: number;
@@ -25,6 +23,7 @@ export interface PlayerInputState {
   throttle: number;
   brake: number;
   turbo: number;
+  shoot: number;
 }
 
 export interface PlayerState {
@@ -49,9 +48,15 @@ export interface PlayerState {
   pitchRate: number;
   rollBank: number;
   bankResponse: number;
+  smoothedPitch: number;
+  smoothedYaw: number;
+  smoothedRoll: number;
+  shootingTimer: number;
+  physics: AirplanePhysicsConfig;
   _scratchA: Vec3;
   _scratchB: Vec3;
   _rotationQuat: Float32Array;
+  lastShootTime: number;
 }
 
 export function createPlayerInputState(): PlayerInputState {
@@ -62,10 +67,15 @@ export function createPlayerInputState(): PlayerInputState {
     throttle: 0,
     brake: 0,
     turbo: 0,
+    shoot: 0,
   };
 }
 
-export function createPlayerState(worldRadius: number, initialAltitude: number): PlayerState {
+export function createPlayerState(
+  worldRadius: number, 
+  initialAltitude: number,
+  physics: AirplanePhysicsConfig = AIRPLANE_PRESETS.fighter.physics
+): PlayerState {
   const orbitRadius = worldRadius + initialAltitude;
   const position = vec3(orbitRadius, 0, 0);
   const gravityUp = vec3(1, 0, 0);
@@ -86,22 +96,30 @@ export function createPlayerState(worldRadius: number, initialAltitude: number):
     worldRadius,
     altitude: initialAltitude,
     pitchAngle: 0,
-    speed: 42,
-    minSpeed: 12,
-    maxSpeed: 160,
-    acceleration: 28,
-    turboBoost: 2.2,
-    yawRate: 0.9,
-    pitchRate: 0.7,
+    speed: physics.minSpeed * 2.0,
+    minSpeed: physics.minSpeed,
+    maxSpeed: physics.maxSpeed,
+    acceleration: physics.acceleration,
+    turboBoost: physics.turboBoost,
+    yawRate: physics.yawRate,
+    pitchRate: physics.pitchRate,
     rollBank: 0,
-    bankResponse: 2.4,
+    bankResponse: physics.bankResponse,
+    smoothedPitch: 0,
+    smoothedYaw: 0,
+    smoothedRoll: 0,
+    shootingTimer: 0,
+    physics,
     _scratchA: vec3(),
     _scratchB: vec3(),
     _rotationQuat: quat(),
+    lastShootTime: 0,
   };
 }
 
 
+
+import { calculateWaveHeight } from "./noise";
 
 export function updatePlayerController(
   player: PlayerState,
@@ -109,6 +127,7 @@ export function updatePlayerController(
   deltaTime: number,
   terrainQuery: TerrainQuery,
   seaLevel: number,
+  time: number,
 ): PlayerState {
   const response = clamp(player.bankResponse * deltaTime, 0, 1);
   
@@ -129,8 +148,14 @@ export function updatePlayerController(
   // Bank/Roll
   player.rollBank += ((input.roll * 0.75) - player.rollBank) * response;
 
-  // Pitch explícito
-  player.pitchAngle += input.pitch * player.pitchRate * deltaTime;
+  // Smoothing for visuals/animations/physics
+  const animSmoothFactor = clamp(12.0 * deltaTime, 0, 1);
+  player.smoothedPitch += (input.pitch - player.smoothedPitch) * animSmoothFactor;
+  player.smoothedYaw += (input.yaw - player.smoothedYaw) * animSmoothFactor;
+  player.smoothedRoll += (input.roll - player.smoothedRoll) * animSmoothFactor;
+
+  // Pitch dinâmico usando valor suavizado
+  player.pitchAngle += player.smoothedPitch * player.pitchRate * deltaTime;
   const maxPitch = Math.PI / 2 * 0.85;
   player.pitchAngle = clamp(player.pitchAngle, -maxPitch, maxPitch);
 
@@ -138,8 +163,8 @@ export function updatePlayerController(
   const forwardSpeed = Math.cos(player.pitchAngle) * player.speed;
   const verticalVelocity = Math.sin(player.pitchAngle) * player.speed;
 
-  // Yaw coordenado com bank
-  const coordinatedYaw = (input.yaw + player.rollBank * 0.8) * player.yawRate * deltaTime;
+  // Yaw coordenado com bank e input suavizado
+  const coordinatedYaw = (player.smoothedYaw + player.rollBank * 0.8) * player.yawRate * deltaTime;
 
   // Garantir que forward atual está no plano tangente
   vec3ProjectOnPlane(player.forward, player.forward, player.gravityUp);
@@ -161,13 +186,20 @@ export function updatePlayerController(
   // Atualizar altitude
   player.altitude += verticalVelocity * deltaTime;
 
-  // Colisão de terreno
+  // Colisão de terreno e ondas
   const landHeight = terrainQuery.getHeight(player.gravityUp);
-  const minAltitude = Math.max(landHeight, seaLevel) + 2.0;
+  
+  // Wave height logic
+  const waveHeight = calculateWaveHeight(
+    vec3Scale(player._scratchB, player.gravityUp, player.worldRadius),
+    time,
+    terrainQuery.config
+  );
+  const minAltitude = Math.max(landHeight, seaLevel + waveHeight) + 2.0;
 
   if (player.altitude < minAltitude) {
     player.altitude = minAltitude;
-    // Bateu no chão: força nariz para cima gradualmente e perde vel
+    // Bateu no chão ou água: força nariz para cima gradualmente e perde vel
     player.pitchAngle = Math.max(player.pitchAngle, 0); 
     player.speed = clamp(player.speed * 0.98, player.minSpeed, player.maxSpeed);
   }

@@ -671,8 +671,8 @@ function buildAiHints(entry: SemanticMapEntry): string[] {
   if (entry.role === "engine_part") {
     hints.push("Likely rotating or engine-adjacent part; prefer local rotation over translation.");
   }
-  if (entry.bounds) {
-    const [sx, sy, sz] = entry.bounds.size;
+  if (entry.worldBounds) {
+    const [sx, sy, sz] = entry.worldBounds.size;
     hints.push(`Approximate world size: ${sx} x ${sy} x ${sz}.`);
   }
   if (hints.length === 0) {

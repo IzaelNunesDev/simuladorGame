@@ -5,6 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "start:server": "node server/multiplayer-server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -22,5 +25,8 @@
   "devDependencies": {
     "typescript": "^6.0.3",
     "vite": "^8.0.10"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
   }
 }
